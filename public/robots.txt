@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+
+# The host here must match the --site-origin passed to `npm run mirror`, because that
+# is what the generated sitemap.xml and every page's canonical URL use. A mismatch
+# means crawlers are pointed at a sitemap whose <loc> values are on another domain,
+# and they will discard it. Change both together, or deploy with:
+#
+#   node tools/mirror.mjs --site-origin https://starbillions.com
+#
+Sitemap: https://starbillions.com/sitemap.xml

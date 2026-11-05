@@ -1,0 +1,945 @@
+[
+  {
+    "label": "观看方向",
+    "values": [
+      {
+        "value": "IPS",
+        "count": 16
+      },
+      {
+        "value": "12 o'clock(TN)",
+        "count": 7
+      },
+      {
+        "value": "12 O\"CLOCK",
+        "count": 4
+      },
+      {
+        "value": "Full View",
+        "count": 2
+      },
+      {
+        "value": "6 \"CLOCK",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "label": "连接方式",
+    "values": [
+      {
+        "value": "FPC",
+        "count": 12
+      },
+      {
+        "value": "PCB",
+        "count": 11
+      }
+    ]
+  },
+  {
+    "label": "驱动ic",
+    "values": [
+      {
+        "value": "-",
+        "count": 12
+      },
+      {
+        "value": "EK79001/EK73215",
+        "count": 2
+      },
+      {
+        "value": "ST7701",
+        "count": 2
+      },
+      {
+        "value": "HX8238-D",
+        "count": 1
+      },
+      {
+        "value": "NV3052C",
+        "count": 1
+      },
+      {
+        "value": "ST7282",
+        "count": 1
+      },
+      {
+        "value": "ST7283",
+        "count": 1
+      },
+      {
+        "value": "ILI6122/ILI5960",
+        "count": 1
+      },
+      {
+        "value": "HX8264",
+        "count": 1
+      },
+      {
+        "value": "EK9713/EK73002",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "label": "驱动电压",
+    "values": [
+      {
+        "value": "3.3V",
+        "count": 27
+      },
+      {
+        "value": "5V",
+        "count": 4
+      },
+      {
+        "value": "2.8V",
+        "count": 3
+      }
+    ]
+  },
+  {
+    "label": "储存温度",
+    "values": [
+      {
+        "value": "- 30 ° ~ 80 °",
+        "count": 30
+      }
+    ]
+  },
+  {
+    "label": "界面",
+    "values": [
+      {
+        "value": "EDP-30PIN",
+        "count": 11
+      },
+      {
+        "value": "8 Pin",
+        "count": 5
+      },
+      {
+        "value": "RGB-40PIN",
+        "count": 4
+      },
+      {
+        "value": "LVDS-60PIN",
+        "count": 2
+      },
+      {
+        "value": "RGB-54PIN",
+        "count": 2
+      },
+      {
+        "value": "HDMI + VGA",
+        "count": 2
+      },
+      {
+        "value": "Micro HDMI + USB",
+        "count": 1
+      },
+      {
+        "value": "QSPI",
+        "count": 1
+      },
+      {
+        "value": "5 Pin",
+        "count": 1
+      },
+      {
+        "value": "MIPI-40PIN",
+        "count": 1
+      },
+      {
+        "value": "RGB-60PIN",
+        "count": 1
+      },
+      {
+        "value": "RGB-50PIN",
+        "count": 1
+      },
+      {
+        "value": "LVDS-40PIN",
+        "count": 1
+      },
+      {
+        "value": "HDMI + USB",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "label": "液晶屏品牌",
+    "values": [
+      {
+        "value": "PANDA",
+        "count": 11
+      },
+      {
+        "value": "BOE",
+        "count": 10
+      },
+      {
+        "value": "AUO",
+        "count": 9
+      },
+      {
+        "value": "CTC",
+        "count": 9
+      },
+      {
+        "value": "INNOLUX",
+        "count": 5
+      },
+      {
+        "value": "HSD",
+        "count": 4
+      },
+      {
+        "value": "Giantplus",
+        "count": 2
+      }
+    ]
+  },
+  {
+    "label": "产品尺寸",
+    "values": [
+      {
+        "value": "15.6\"TFT",
+        "count": 2
+      },
+      {
+        "value": "3.5\"TFT",
+        "count": 2
+      },
+      {
+        "value": "83.05*84.05*4.0(mm)",
+        "count": 2
+      },
+      {
+        "value": "4.3\"TFT",
+        "count": 2
+      },
+      {
+        "value": "1.54″ TFT",
+        "count": 1
+      },
+      {
+        "value": "1.65",
+        "count": 1
+      },
+      {
+        "value": "10.1” TFT LCD Panel",
+        "count": 1
+      },
+      {
+        "value": "10.1\"TFT",
+        "count": 1
+      },
+      {
+        "value": "13.3\"TFT",
+        "count": 1
+      },
+      {
+        "value": "2.1\"TFT round display",
+        "count": 1
+      },
+      {
+        "value": "2.4” TFT LCD Panel",
+        "count": 1
+      },
+      {
+        "value": "2.8” TFT LCD Panel",
+        "count": 1
+      },
+      {
+        "value": "3.5” TFT LCD Panel",
+        "count": 1
+      },
+      {
+        "value": "25.3(W)*98.89(L)*1.65(H)(mm)",
+        "count": 1
+      },
+      {
+        "value": "4.0\"TFT",
+        "count": 1
+      },
+      {
+        "value": "4.3” TFT LCD Panel",
+        "count": 1
+      },
+      {
+        "value": "4.95\"TFT",
+        "count": 1
+      },
+      {
+        "value": "5.0\"TFT",
+        "count": 1
+      },
+      {
+        "value": "5.7″ TFT",
+        "count": 1
+      },
+      {
+        "value": "6.2\"TFT",
+        "count": 1
+      },
+      {
+        "value": "6.9″ TFT",
+        "count": 1
+      },
+      {
+        "value": "7.0\"TFT",
+        "count": 1
+      },
+      {
+        "value": "7” TFT LCD Panel",
+        "count": 1
+      },
+      {
+        "value": "8.0\"TFT",
+        "count": 1
+      },
+      {
+        "value": "9.0\"TFT",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "label": "led电流电压",
+    "values": [
+      {
+        "value": "32V/80MA",
+        "count": 10
+      },
+      {
+        "value": "19.2V/20MA",
+        "count": 2
+      },
+      {
+        "value": "22.4V/20MA",
+        "count": 2
+      },
+      {
+        "value": "19.2V/210MA",
+        "count": 1
+      },
+      {
+        "value": "22.4V/160MA",
+        "count": 1
+      },
+      {
+        "value": "12.8V/40MA",
+        "count": 1
+      },
+      {
+        "value": "19.2V/40MA",
+        "count": 1
+      },
+      {
+        "value": "19.2V/60MA",
+        "count": 1
+      },
+      {
+        "value": "9.6V/140MA",
+        "count": 1
+      },
+      {
+        "value": "9.6V/120MA",
+        "count": 1
+      },
+      {
+        "value": "9.6V/180MA",
+        "count": 1
+      },
+      {
+        "value": "19.2V/180MA",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "label": "亮度cd-m2",
+    "values": [
+      {
+        "value": "250-1000",
+        "count": 9
+      },
+      {
+        "value": "250-500cd/m2",
+        "count": 5
+      },
+      {
+        "value": "200cd/m2",
+        "count": 3
+      },
+      {
+        "value": "450",
+        "count": 2
+      },
+      {
+        "value": "100 CD/m2",
+        "count": 2
+      },
+      {
+        "value": "220",
+        "count": 1
+      },
+      {
+        "value": "250",
+        "count": 1
+      },
+      {
+        "value": "250-1000cd/m2",
+        "count": 1
+      },
+      {
+        "value": "180 CD/m2",
+        "count": 1
+      },
+      {
+        "value": "500",
+        "count": 1
+      },
+      {
+        "value": "300-600cd/m2",
+        "count": 1
+      },
+      {
+        "value": "可按要求定制",
+        "count": 1
+      },
+      {
+        "value": "230CD/m2",
+        "count": 1
+      },
+      {
+        "value": "300cd/m2",
+        "count": 1
+      },
+      {
+        "value": "250 CD/m2",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "label": "产品型号",
+    "values": [
+      {
+        "value": "XBY024R240320-01",
+        "count": 2
+      },
+      {
+        "value": "Starbillions 1.28″ round TFT XBY128FHD",
+        "count": 1
+      },
+      {
+        "value": "XBY08001",
+        "count": 1
+      },
+      {
+        "value": "XBY01701-1.6",
+        "count": 1
+      },
+      {
+        "value": "Starbillions 1.54″ round TFT XBY154FHD",
+        "count": 1
+      },
+      {
+        "value": "Starbillions 1.65″ TFT XBY165FHD",
+        "count": 1
+      },
+      {
+        "value": "XBY101R024600-01",
+        "count": 1
+      },
+      {
+        "value": "XBY101MHC663",
+        "count": 1
+      },
+      {
+        "value": "XBY133MXM662",
+        "count": 1
+      },
+      {
+        "value": "XBY156FHD",
+        "count": 1
+      },
+      {
+        "value": "Starbillions 2.1″ round TFT XBY21FHD",
+        "count": 1
+      },
+      {
+        "value": "XBY035MGA310",
+        "count": 1
+      },
+      {
+        "value": "XBY035R320480-01",
+        "count": 1
+      },
+      {
+        "value": "XBY035MIE660",
+        "count": 1
+      },
+      {
+        "value": "Starbillions 3.71″ TFT XBY371FHD",
+        "count": 1
+      },
+      {
+        "value": "Starbillions 3.95″ TFT XBY395FHD",
+        "count": 1
+      },
+      {
+        "value": "XBY040MHF661",
+        "count": 1
+      },
+      {
+        "value": "XBY043MIA631",
+        "count": 1
+      },
+      {
+        "value": "XBY043R480272-01",
+        "count": 1
+      },
+      {
+        "value": "Starbillions 4.3″ TFT XBY43FHD",
+        "count": 1
+      },
+      {
+        "value": "XBY043MBA617",
+        "count": 1
+      },
+      {
+        "value": "XBY050FIM008",
+        "count": 1
+      },
+      {
+        "value": "XBY050MIB582",
+        "count": 1
+      },
+      {
+        "value": "Starbillions 5.7″ TFT XBY57FHD",
+        "count": 1
+      },
+      {
+        "value": "XBY062MHB570",
+        "count": 1
+      },
+      {
+        "value": "Starbillions 6.9″ TFT XBY57FHD",
+        "count": 1
+      },
+      {
+        "value": "XBY070MIB623",
+        "count": 1
+      },
+      {
+        "value": "XBY070R800480-01",
+        "count": 1
+      },
+      {
+        "value": "XBY080MID559",
+        "count": 1
+      },
+      {
+        "value": "XBY090MHC662",
+        "count": 1
+      },
+      {
+        "value": "XBY08007",
+        "count": 1
+      },
+      {
+        "value": "XBY08006",
+        "count": 1
+      },
+      {
+        "value": "XBY08002",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "label": "外形尺寸",
+    "values": [
+      {
+        "value": "56.18*59.71*2.26(mm)",
+        "count": 3
+      },
+      {
+        "value": "44.0(W)*44.0(L)*3.14(H)(mm)",
+        "count": 1
+      },
+      {
+        "value": "11.5(W) x 60(H) x 10.6(T)mm",
+        "count": 1
+      },
+      {
+        "value": "42.94 (W) x 45.89 (H) x 1.6 (T)mm",
+        "count": 1
+      },
+      {
+        "value": "31.52(w)*33.72(L) *1.9(H)",
+        "count": 1
+      },
+      {
+        "value": "42.94(W)*45.87(L)*2.10(H)(mm)",
+        "count": 1
+      },
+      {
+        "value": "235 (W) x 143 (H) x 2.8 (T)mm",
+        "count": 1
+      },
+      {
+        "value": "234.9MMx143MMx4.45MM",
+        "count": 1
+      },
+      {
+        "value": "305.2MM x 187.1MM x 2.6MM",
+        "count": 1
+      },
+      {
+        "value": "359.5MMx 223.75MMx 3.1MM",
+        "count": 1
+      },
+      {
+        "value": "42.72(W) x 60.26(H) x 3.5(T)mm",
+        "count": 1
+      },
+      {
+        "value": "50(W) x 69.2(H) x 3.4(T)mm",
+        "count": 1
+      },
+      {
+        "value": "76.84MM*63.84MM*3.25MM",
+        "count": 1
+      },
+      {
+        "value": "54.46(W) x 82.94(H) x 2.2(T)mm",
+        "count": 1
+      },
+      {
+        "value": "76.9MM*63.9MM*3.4",
+        "count": 1
+      },
+      {
+        "value": "76.92MM*78.55MM*2.45MM",
+        "count": 1
+      },
+      {
+        "value": "105.4MM*67.1MM*3.05MM",
+        "count": 1
+      },
+      {
+        "value": "165(W) x 124(H) x 17.6(T)mm",
+        "count": 1
+      },
+      {
+        "value": "60.86(W)*102.57(L)*2.7(H)(mm)",
+        "count": 1
+      },
+      {
+        "value": "105.5MM*67.2MM*2.95MM",
+        "count": 1
+      },
+      {
+        "value": "66.4MM*120.05MM*2.1MM",
+        "count": 1
+      },
+      {
+        "value": "120.7MM*75.8MM*2.8MM",
+        "count": 1
+      },
+      {
+        "value": "127.0 (W) *98.43(L)*5.8(H)",
+        "count": 1
+      },
+      {
+        "value": "155.2MM*88.2MM*5.0MM",
+        "count": 1
+      },
+      {
+        "value": "85.8(W)*171.8(L)*3.98(H)",
+        "count": 1
+      },
+      {
+        "value": "164.86MM*99.96MM*3.5MM",
+        "count": 1
+      },
+      {
+        "value": "188.9(W)x105.1(H)x17.6(T)mm",
+        "count": 1
+      },
+      {
+        "value": "183MM*141MM*6.3MM",
+        "count": 1
+      },
+      {
+        "value": "210.7MMx126.4MMx5.2MM",
+        "count": 1
+      },
+      {
+        "value": "111(W) x 50(H) x 17(T)mm",
+        "count": 1
+      },
+      {
+        "value": "76(W) x 55(H) x 8.6(T)mm",
+        "count": 1
+      },
+      {
+        "value": "111.5(W) x 65(H) x 7.5(T)mm",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "label": "显示（区域）尺寸",
+    "values": [
+      {
+        "value": "70.08MM x 52.56MM",
+        "count": 2
+      },
+      {
+        "value": "32.4(W)*32.4(L)(mm)",
+        "count": 1
+      },
+      {
+        "value": "39.84 (W) x 39.84 (H)mm",
+        "count": 1
+      },
+      {
+        "value": "71.86(W)*70.18(L)",
+        "count": 1
+      },
+      {
+        "value": "39.84(W)*39.84(L)(mm)",
+        "count": 1
+      },
+      {
+        "value": "222.72 (W) x 125.28 (H)mm",
+        "count": 1
+      },
+      {
+        "value": "222.72MMx125.28MM",
+        "count": 1
+      },
+      {
+        "value": "293.76MMx 165.24MM",
+        "count": 1
+      },
+      {
+        "value": "344.16 MM x 193.59MM",
+        "count": 1
+      },
+      {
+        "value": "53.28(H)*53.28(V)(mm)",
+        "count": 1
+      },
+      {
+        "value": "36.72(W) x 48.96(H)mm",
+        "count": 1
+      },
+      {
+        "value": "43.2(W) x 57.6(H)mm",
+        "count": 1
+      },
+      {
+        "value": "48.96(W) x 73.44(H)mm",
+        "count": 1
+      },
+      {
+        "value": "22.86(W)*91.44(L)(mm)",
+        "count": 1
+      },
+      {
+        "value": "71.86*70.18(mm)",
+        "count": 1
+      },
+      {
+        "value": "71.86MM x 70.18MM",
+        "count": 1
+      },
+      {
+        "value": "95.04MM x 53.86MM",
+        "count": 1
+      },
+      {
+        "value": "95.04(W) x 53.856(H)mm",
+        "count": 1
+      },
+      {
+        "value": "56.16(W)* 93.6(L)(mm)",
+        "count": 1
+      },
+      {
+        "value": "95.04MMx53.856MM",
+        "count": 1
+      },
+      {
+        "value": "61.56MM x 109.53MM",
+        "count": 1
+      },
+      {
+        "value": "108MM x 64.8MM",
+        "count": 1
+      },
+      {
+        "value": "115.2 (W)* 86.40(L)",
+        "count": 1
+      },
+      {
+        "value": "137.52MMx77.232MM",
+        "count": 1
+      },
+      {
+        "value": "78.0192 (W)*156.0384(L)",
+        "count": 1
+      },
+      {
+        "value": "154.08MMx85.92MM",
+        "count": 1
+      },
+      {
+        "value": "154.08(W) x 85.92(H)mm",
+        "count": 1
+      },
+      {
+        "value": "162.05 MMx 121.54MM",
+        "count": 1
+      },
+      {
+        "value": "196.608MMx114.15MM",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "label": "分辨率",
+    "values": [
+      {
+        "value": "480*480RGB/MIPI",
+        "count": 3
+      },
+      {
+        "value": "800RGB×480",
+        "count": 3
+      },
+      {
+        "value": "400*400",
+        "count": 2
+      },
+      {
+        "value": "1024RGBx600",
+        "count": 2
+      },
+      {
+        "value": "1920RGB*1080",
+        "count": 2
+      },
+      {
+        "value": "240 x 320",
+        "count": 2
+      },
+      {
+        "value": "480RGB×272",
+        "count": 2
+      },
+      {
+        "value": "240*240 SPI",
+        "count": 1
+      },
+      {
+        "value": "1280(RGB)*800",
+        "count": 1
+      },
+      {
+        "value": "240*240",
+        "count": 1
+      },
+      {
+        "value": "400*400MIPI",
+        "count": 1
+      },
+      {
+        "value": "1024*600",
+        "count": 1
+      },
+      {
+        "value": "320RGB×240",
+        "count": 1
+      },
+      {
+        "value": "320*480",
+        "count": 1
+      },
+      {
+        "value": "640RGB×480",
+        "count": 1
+      },
+      {
+        "value": "240*960RGB",
+        "count": 1
+      },
+      {
+        "value": "480RGB×480",
+        "count": 1
+      },
+      {
+        "value": "480*272",
+        "count": 1
+      },
+      {
+        "value": "480*800MIPI/RGB",
+        "count": 1
+      },
+      {
+        "value": "480RGB×854",
+        "count": 1
+      },
+      {
+        "value": "640*480MIPI/RGB/LVDS",
+        "count": 1
+      },
+      {
+        "value": "720*1440MIPI",
+        "count": 1
+      },
+      {
+        "value": "800*480",
+        "count": 1
+      },
+      {
+        "value": "1024RGB×768",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "label": "工作温度",
+    "values": [
+      {
+        "value": "- 20 ° ~ 70 °",
+        "count": 14
+      },
+      {
+        "value": "O/T:-20~+70°C S/T:-30~+80°C",
+        "count": 11
+      },
+      {
+        "value": "- 30 ° ~ 85 °",
+        "count": 5
+      },
+      {
+        "value": "O/T:-10~+60°C S/T:-20~+70°C",
+        "count": 3
+      },
+      {
+        "value": "O/T:-20~+60°C S/T:-30~+70°C",
+        "count": 1
+      }
+    ]
+  }
+]

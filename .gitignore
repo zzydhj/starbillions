@@ -1,0 +1,39 @@
+# The published site, committed on purpose.
+#
+# Cloudflare Pages deploys straight from this repository, and the mirror cannot be
+# built there: its inputs are the 1.9 GB unpacked backup in work/ and the 396 MB
+# archive in 24.4.22-tftstar/, neither of which can live in a repository. So the build
+# output is the artifact this repo carries, Pages is told to run no build command, and
+# the deploy step is "rebuild locally, commit dist, push".
+#
+# dist/ is therefore generated content under version control. Never hand-edit it: the
+# next run of node tools/mirror.mjs overwrites whatever is there.
+
+# Scratch derived from the WordPress backup: the unpacked 1 GB docroot, the
+# decompressed SQL dump, and a wp-config.php holding local database credentials.
+# None of it belongs in a repository, and none of it is needed to build the site.
+work/
+
+# The backup itself, supplied as an input to the ingest rather than stored here.
+24.4.22-tftstar/
+
+# The Friway design reference. It informed an earlier, abandoned build and is not part
+# of this mirror, so shipping it would put someone else's template in the repo.
+Template/
+
+# dependencies
+node_modules/
+
+# logs
+*.log
+npm-debug.log*
+
+# local env overrides
+.env
+.env.local
+
+# editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,39 @@
+# Cloudflare Pages reads this file from the site root.
+#
+# This site is a mirror of a WordPress output, so its asset names carry a query
+# (?ver=7.3.3) rather than a content fingerprint, and the paths are the theme's and
+# plugins' own. That splits caching into two honest groups:
+#
+#   /wp-content/uploads/**   WordPress never overwrites an existing upload; a new
+#                            image is a new filename. Long-lived caching is safe.
+#   everything else          A rebuild can change the bytes behind the same path (a
+#                            plugin update, an Elementor-generated stylesheet). These
+#                            revalidate: one If-Modified-Since round trip, and
+#                            Cloudflare answers most of them from cache anyway.
+#
+# No Content-Security-Policy here on purpose. The mirrored pages depend on inline
+# scripts and inline styles that WP Rocket and Elementor emit; a policy strict enough
+# to matter would break the pages, and one loose enough to let them through is not a
+# security header, it is a comment saying so.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Uploaded images, the bulk of this site's weight.
+/wp-content/uploads/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Font Awesome's web fonts and the theme's own font files live in webfonts/ and
+# fonts/ directories; they are versioned by directory in practice.
+/wp-content/*webfonts/*
+  Cache-Control: public, max-age=31536000, immutable
+/wp-content/*fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The HTML itself must never be held: the mirror is regenerated wholesale, and a
+# stale page would point at asset paths a later build may not have written.
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate

@@ -1,0 +1,456 @@
+/**
+ * Build the static mirror from the site's own rendered page cache.
+ *
+ *   node tools/mirror.mjs [--site-origin https://example.com] [--dry]
+ *
+ * The input is WP Rocket's cache under work/wp/.../cache/wp-rocket/<host>/, which
+ * holds the HTML WordPress finished producing: complete documents with the theme's
+ * header and footer, for both languages. That is why no PHP is needed here, and why
+ * the result can be a true 1:1 rather than a reconstruction.
+ *
+ * Three things are decided in this file rather than assumed:
+ *
+ * 1. Which variant to ship. Every cached page exists as a desktop
+ *    (index-https.html) and a mobile (index-mobile-https.html) document, served
+ *    apart by User-Agent. A static host cannot vary on User-Agent, so the desktop
+ *    document is the one that ships, and the three pages that only have a mobile
+ *    variant fall back with a report instead of silently differing.
+ *
+ * 2. Which URL a page is. Taken from the directory it was cached in, because that
+ *    tree mirrors the site's URL path segment for segment. The canonical link is
+ *    read only to cross-check it: 97 of the 217 cached pages - every archive, the
+ *    shop, the blog, categories, an author page and the paginated pages - carry no
+ *    canonical at all, which is WordPress behaviour on those templates rather than
+ *    damage in the backup. Keying on the canonical would have deleted 45% of the
+ *    mirror's pages, including the whole product catalogue's structure.
+ *
+ * 3. What happens to a reference. Handled by staticize.js: same-site files are
+ *    copied and written as root-absolute paths, cart and account links are removed
+ *    by the earlier decision, and head metadata keeps an absolute URL on the new
+ *    origin because a canonical pointing at the old host would tell search engines
+ *    this mirror is somebody else's copy.
+ *
+ * The desktop and mobile files are byte-identical for 214 of the 217 directories,
+ * so preferring one of them costs nothing; the three that exist only as mobile are
+ * reported rather than skipped.
+ */
+import { copyFileSync, readdirSync, readFileSync } from 'node:fs';
+import { copyFile, mkdir, writeFile as writeFileAsync } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { dirname as posixDirname, join as posixJoin, resolve as posixResolve } from 'node:path/posix';
+import { paths } from './lib/paths.js';
+import { exists, removeTree } from './lib/fs-utils.js';
+import { ENQUIRE_LABELS, ENQUIRY_PHONE, rewriteInquireButtons, whatsappUrlFor } from './lib/site-links.js';
+import {
+  fileReferencesIn,
+  internalUrl,
+  isExcluded,
+  moveLanguageFloater,
+  originSet,
+  rebaseIdentityUrls,
+  referencesIn,
+  rewriteReferences,
+  rootifyOrigins,
+  stripLanguagePrefix,
+  toOutputPath,
+} from './ingest/wp/staticize.js';
+
+const VARIANTS = ['index-https.html', 'index.html', 'index-mobile-https.html'];
+const MOBILE = 'index-mobile-https.html';
+
+// The enquiry button labels and the number they should reach are the owner's
+// preference, held in lib/site-links.js so the deployment gate checks the same values
+// this builder applied.
+
+const args = process.argv.slice(2);
+const siteOrigin = valueAfter('--site-origin') ?? 'https://starbillions.com';
+const floaterPosition = valueAfter('--language-floater') ?? 'top-right';
+const whatsapp = whatsappUrlFor(valueAfter('--whatsapp') ?? ENQUIRY_PHONE);
+const dry = args.includes('--dry');
+
+const origins = originSet();
+
+/* discover ------------------------------------------------------------------ */
+
+/**
+ * Every cached page, as { urlPath, file, variant, mobileOnly, canonical }.
+ *
+ * Directory names on disk are percent-encoded exactly as the browser requested
+ * them, so decoding one gives the real path segment; the output file keeps the
+ * decoded form, which is how the host resolves a percent-encoded request to it -
+ * the same arrangement the site's own uploads already use.
+ */
+export function discover(cacheRoot) {
+  const found = [];
+
+  const visit = (dir, relative) => {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    const html = entries.filter((entry) => entry.isFile() && entry.name.endsWith('.html'));
+
+    if (html.length > 0) {
+      const names = new Set(html.map((entry) => entry.name));
+      const chosen = VARIANTS.find((name) => names.has(name));
+      const urlPath = relative === '' ? '/' : `${decodeURIComponent(relative)}/`;
+      const text = readFileSync(join(dir, chosen), 'utf8');
+
+      found.push({
+        urlPath,
+        file: join(dir, chosen),
+        variant: chosen,
+        mobileOnly: chosen === MOBILE,
+        canonical: canonicalOf(text),
+        bytes: Buffer.byteLength(text),
+      });
+    }
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) visit(join(dir, entry.name), `${relative}/${entry.name}`);
+    }
+  };
+
+  visit(cacheRoot, '');
+  return found;
+}
+
+/** Reads the canonical URL out of a rendered document, tolerating attribute order. */
+function canonicalOf(text) {
+  for (const match of text.matchAll(/<link\b[^>]*>/gi)) {
+    const tag = match[0];
+    if (!/rel=["']?canonical["']?/i.test(tag)) continue;
+
+    const href = /href=["']([^"']+)["']/i.exec(tag);
+    if (href) return href[1];
+  }
+
+  return null;
+}
+
+/* build --------------------------------------------------------------------- */
+
+export async function build({ quiet = false } = {}) {
+  const started = Date.now();
+  const report = quiet ? () => {} : (label, detail) => console.log(`  ${label.padEnd(12)} ${detail}`);
+
+  const pages = discover(paths.pageCache).map((page) => ({
+    ...page,
+    outPath: toOutputPath(new URL(`https://tftstar.com${page.urlPath}`)),
+    pageUrl: `https://tftstar.com${page.urlPath}`,
+  }));
+
+  /**
+   * Pages whose own canonical link disagrees with the directory holding them.
+   *
+   * Both cannot be served from one file, so the directory wins and the disagreement
+   * is reported: it means the cache was written under one permalink scheme and later
+   * rendered under another, which is exactly what happened to this site's blog URLs.
+   */
+  const mismatched = pages.filter((page) => page.canonical !== null
+    && decodeURIComponent(new URL(page.canonical).pathname) !== page.urlPath);
+
+  /**
+   * What the mirror will contain, as a set of URL paths.
+   *
+   * A link to a page outside this set stays as written and is reported: the cache
+   * only holds pages someone visited, so archives and tag pages that were never
+   * rendered are genuinely missing, and silently rewiring them would invent
+   * structure the site did not have.
+   */
+  const knownPages = new Set(pages.map((page) => page.urlPath));
+
+  const assets = new Map();
+  const unknownPages = new Map();
+  const missingFiles = new Set();
+
+  for (const page of pages) {
+    const text = readFileSync(page.file, 'utf8');
+
+    // Files first, found by path shape rather than attribute name: Woodmart's own
+    // lazy loading hides behind data-wood-src and Elementor inside data-settings
+    // JSON, and an attribute list silently missed both.
+    for (const reference of fileReferencesIn(text)) {
+      const path = safeDecode(reference);
+      if (assets.has(path)) continue;
+
+      const present = exists(join(paths.docroot, path.replace(/^\/+/, '')));
+      assets.set(path, present ? 'copy' : 'absent');
+      if (!present) missingFiles.add(path);
+    }
+
+    // Then page links, to learn which targets the origin never rendered.
+    for (const raw of referencesIn(text)) {
+      const url = internalUrl(raw, origins, page.pageUrl);
+      if (url === null || isExcluded(url)) continue;
+
+      const path = safeDecode(decodeURIComponent(url.pathname));
+      if (hasExtension(path)) continue;
+
+      if (!knownPages.has(path.endsWith('/') ? path : `${path}/`)) {
+        unknownPages.set(path, (unknownPages.get(path) ?? 0) + 1);
+      }
+    }
+  }
+
+  report('pages', `${pages.length} rendered, ${knownPages.size} distinct URLs, ${mismatched.length} canonical mismatch`);
+
+  /**
+   * Second hop: what the copied stylesheets themselves ask for.
+   *
+   * Scanning pages cannot see these, and Font Awesome's whole web-font set was
+   * missing for exactly that reason - icons simply did not render. A relative url()
+   * resolves against the stylesheet's own directory and the file keeps that
+   * directory in the output, so the reference stays correct without rewriting CSS.
+   */
+  const fromCss = new Set();
+  const copiedStylesheets = [...assets].filter(([, kind]) => kind === 'copy').filter(([path]) => path.endsWith('.css'));
+
+  for (const [path] of copiedStylesheets) {
+    const text = readFileSync(join(paths.docroot, path.replace(/^\/+/, '')), 'utf8');
+
+    for (const match of text.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/gi)) {
+      const raw = safeDecode(match[1].split('?')[0].split('#')[0]);
+      if (raw.startsWith('data:') || raw.startsWith('#')) continue;
+
+      const target = raw.startsWith('/') ? raw : posixResolve(posixDirname(posixJoin('/', path)), raw);
+      const rel = target.replace(/^\/+/, '');
+
+      if (!rel.startsWith('wp-content/') && !rel.startsWith('wp-includes/')) continue;
+      if (assets.has(rel)) continue;
+
+      const present = exists(join(paths.docroot, rel));
+      assets.set(rel, present ? 'copy' : 'absent');
+      if (!present) missingFiles.add(rel);
+      else fromCss.add(rel);
+    }
+  }
+
+  report('from CSS', `${fromCss.size} files reachable only through a stylesheet url()`);
+  report('assets', `${[...assets].filter(([, kind]) => kind === 'copy').length} to copy, ${missingFiles.size} referenced but absent`);
+
+  if (dry) {
+    console.log('\n  --dry: nothing written\n');
+    return { pages: usable.length, assets: assets.size };
+  }
+
+  removeTree(paths.dist);
+
+  let written = 0;
+  let copied = 0;
+  let homeHtml = '';
+  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0 };
+
+  for (const page of pages) {
+    const text = readFileSync(page.file, 'utf8');
+    const rebased = rebaseIdentityUrls(text, origins, siteOrigin);
+
+    const out = rewriteReferences(rebased, {
+      pageUrl: page.pageUrl,
+      origins,
+      /**
+       * Every same-site reference gets a root-absolute path.
+       *
+       * Returning nothing would leave the original https://tftstar.com text in the
+       * page, and a mirror that links back to the dead origin is not a mirror. So an
+       * uncached page still becomes /that/page/ and hits the site's own 404, and an
+       * asset missing from the backup loses its attribute - broken there, broken on
+       * the original host too, since this file tree is the original host's.
+       */
+      classify: (url) => {
+        const path = safeDecode(decodeURIComponent(url.pathname));
+        if (hasExtension(path)) return assets.get(path) === 'copy' ? 'copy' : 'drop';
+        return 'page';
+      },
+    });
+
+    // Two passes the attribute rewrite cannot do: URLs buried in Elementor's
+    // data-settings JSON and Woodmart's inline scripts, and the language prefix
+    // TranslatePress baked into menu links.
+    const html = stripLanguagePrefix(rootifyOrigins(out.html, origins, siteOrigin));
+
+    // The floating language switcher sat bottom-right, on top of the theme's mobile
+    // toolbar. Moved by swapping the plugin's own position class, not by overriding.
+    const positioned = moveLanguageFloater(html, floaterPosition);
+
+    // The owner's one requested departure from 1:1 so far: product enquiry buttons
+    // go to WhatsApp instead of a contact page on a third domain.
+    const edited = rewriteInquireButtons(positioned, whatsapp, ENQUIRE_LABELS);
+
+    stats.rewritten += out.rewritten;
+    stats.dropped += out.dropped;
+
+    const target = join(paths.dist, page.outPath);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFileAsync(target, edited, 'utf8');
+    written += 1;
+    stats.inquireLinks += occurrences(edited, whatsapp) - occurrences(positioned, whatsapp);
+
+    if (page.urlPath === '/') homeHtml = edited;
+  }
+
+  // WordPress never cached a 404 response, so the mirror has none. Cloudflare Pages
+  // looks for exactly this filename, and every uncached link above would otherwise
+  // land on Pages' own branded error page instead of the site's.
+  await writeFileAsync(join(paths.dist, '404.html'), build404(homeHtml), 'utf8');
+
+  const copies = [...assets].filter(([, kind]) => kind === 'copy').map(([path]) => path);
+  await pool(copies, async (path) => {
+    const from = join(paths.docroot, path.replace(/^\/+/, ''));
+    const to = join(paths.dist, path.replace(/^\/+/, ''));
+    await mkdir(dirname(to), { recursive: true });
+    await copyFile(from, to);
+    copied += 1;
+  });
+
+  const sitemap = buildSitemap(pages, siteOrigin);
+  await writeFileAsync(join(paths.dist, 'sitemap.xml'), sitemap, 'utf8');
+
+  copyPublicExtras();
+
+  console.log('\n  mirror written\n');
+  console.log(`  pages          ${written}`);
+  console.log(`  assets         ${copied} copied, ${missingFiles.size} referenced but absent`);
+  console.log(`  links          ${stats.rewritten} rewritten, ${stats.dropped} removed (cart, account, ajax, absent assets)`);
+  console.log(`  mobile-only    ${pages.filter((page) => page.mobileOnly).length} pages shipped from the mobile variant`);
+  console.log(`  sitemap        ${sitemap.split('<url>').length - 1} urls -> ${siteOrigin}`);
+  console.log(`  lang switcher  floating button moved to ${floaterPosition}`);
+  console.log(`  enquiry        ${stats.inquireLinks} buttons -> ${whatsapp || '(left as they were)'}`);
+  console.log(`  uncached links ${unknownPages.size} targets the mirror links to but never rendered`);
+  console.log(`  in             ${((Date.now() - started) / 1000).toFixed(1)} s\n`);
+
+  await writeFileAsync(
+    join(paths.work, 'mirror-report.json'),
+    `${JSON.stringify({
+      siteOrigin,
+      floaterPosition,
+      whatsapp,
+      pages: pages.map((page) => ({ url: page.urlPath, out: page.outPath, mobileOnly: page.mobileOnly, bytes: page.bytes })),
+      canonicalMismatch: mismatched.map((page) => ({ served: page.urlPath, canonical: page.canonical })),
+      absentAssets: [...missingFiles],
+      uncachedLinkTargets: [...unknownPages].sort((a, b) => b[1] - a[1]).map(([path, uses]) => ({ path, uses })),
+    }, null, 2)}\n`,
+  );
+  console.log('  detail -> work/mirror-report.json\n');
+
+  return { written, copied, stats };
+}
+
+function hasExtension(pathname) {
+  return /\.[a-z0-9]{2,5}$/i.test(pathname);
+}
+
+/**
+ * Decode a URL path without failing on a filename that contains a bare percent
+ * sign, which uploads written by hand do occasionally contain.
+ */
+function safeDecode(text) {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * A 404 page assembled from the home page's own chrome.
+ *
+ * Measured on the built home page: exactly one <header> and one <footer> element
+ * each, so the boundaries are unambiguous. The head is reused so the theme CSS and
+ * fonts load identically, with its canonical removed - a 404 must not claim to be
+ * the home page. Scripts are left out: they exist to run cart and filter behaviour
+ * this page has none of.
+ */
+function build404(homeHtml) {
+  if (homeHtml === '') {
+    return '<!DOCTYPE html><html lang="zh-CN"><meta charset="utf-8"><title>404</title>'
+      + '<p>页面未找到 / Page not found. <a href="/">返回首页 / Back to home</a></p>';
+  }
+
+  const head = (/<head(?:\s[^>]*)?>([\s\S]*?)<\/head>/i.exec(homeHtml)?.[1] ?? '')
+    .replace(/<link\b[^>]*rel=["']?canonical["']?[^>]*>\s*/gi, '')
+    .replace(/<title>[\s\S]*?<\/title>/i, `<title>页面未找到 / Not Found${siteSuffix(homeHtml)}</title>`);
+
+  const body = /<body(?:\s[^>]*)?>/i.exec(homeHtml)?.[0] ?? '<body>';
+  const header = /<header(?:\s[^>]*)?>[\s\S]*?<\/header>/i.exec(homeHtml)?.[0] ?? '';
+  const footer = /<footer(?:\s[^>]*)?>[\s\S]*?<\/footer>/i.exec(homeHtml)?.[0] ?? '';
+
+  const notice = `
+    <div class="container" style="padding:80px 0;text-align:center">
+      <h1 style="font-size:42px;margin:0 0 12px">404</h1>
+      <p style="margin:0 0 8px">页面未找到</p>
+      <p style="margin:0 0 24px">Page not found</p>
+      <a class="btn" href="/">返回首页 / Back to home</a>
+    </div>`;
+
+  return `<!DOCTYPE html><html lang="zh-CN"><head>${head}</head>${body}${header}<main>${notice}</main>${footer}</body></html>\n`;
+}
+
+/**
+ * The site's own name, taken from the home page's title suffix.
+ *
+ * Hardcoding a brand here would be a residue of the deleted design system rather
+ * than this site's name, and the title is the one place the site states it itself.
+ */
+function siteSuffix(homeHtml) {
+  const title = /<title>([\s\S]*?)<\/title>/i.exec(homeHtml)?.[1] ?? '';
+  const suffix = title.split(/[\u2013\u2014|-]/).slice(1).join(' ').trim();
+  return suffix === '' ? '' : ` - ${suffix}`;
+}
+
+/** zh at the root and en under /en/ are one page in two languages, so say so. */
+function buildSitemap(pages, origin) {
+  const pagePaths = [...new Set(pages.map((page) => page.urlPath))];
+  const known = new Set(pagePaths);
+
+  const alternatesFor = (path) => {
+    const pairs = [];
+    if (path.startsWith('/en/')) {
+      const twin = path.slice(3);
+      if (known.has(twin)) pairs.push(['zh-Hans', twin]);
+      pairs.push(['en', path]);
+    } else {
+      pairs.push(['zh-Hans', path]);
+      const english = `/en${path === '/' ? '/' : path}`;
+      if (known.has(english)) pairs.push(['en', english]);
+    }
+    return pairs;
+  };
+
+  const body = pagePaths.map((path) => {
+    const links = alternatesFor(path)
+      .map(([lang, alt]) => `<xhtml:link rel="alternate" hreflang="${lang}" href="${origin}${alt}"/>`)
+      .join('');
+    return `  <url><loc>${origin}${path}</loc>${links}</url>`;
+  }).join('\n');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${body}\n</urlset>\n`;
+}
+
+/** Pages-root files that are authored, not generated: _headers, _redirects, robots. */
+function copyPublicExtras() {
+  for (const name of ['_headers', '_redirects', 'favicon.svg', 'robots.txt']) {
+    const from = join(paths.public, name);
+    if (exists(from)) copyFileSync(from, join(paths.dist, name));
+  }
+}
+
+async function pool(items, worker, limit = 12) {
+  const queue = [...items];
+  const runners = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length > 0) await worker(queue.shift());
+  });
+  await Promise.all(runners);
+}
+
+function valueAfter(flag) {
+  const at = args.indexOf(flag);
+  return at === -1 ? undefined : args[at + 1];
+}
+
+/** How many times a literal appears; used to report only what this build changed. */
+function occurrences(text, needle) {
+  if (!needle) return 0;
+  return text.split(needle).length - 1;
+}
+
+if (process.argv[1] && process.argv[1].endsWith('mirror.mjs')) {
+  await build();
+}

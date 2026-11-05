@@ -1,0 +1,24 @@
+# Cloudflare Pages redirect rules, read from the site root.
+#
+# The mirror writes every page as a directory document (product/x/index.html), which
+# Pages serves at /product/x/. That leaves the physical /index.html path reachable
+# too, so the same content would have two URLs. Only the root case is fixed by hand
+# here, because it is the one rule Pages cannot infer from a wildcard.
+#
+# The earlier version of this file listed /records/, /items/ and /about/ - routes of
+# a build that no longer exists. Rules for paths a mirror does not produce are not
+# harmless: they read as intent, and the next person edits the wrong thing.
+
+/index.html    /    308
+
+# Deep duplicates (/product/x/index.html) are handled by Pages' own trailing-slash
+# and directory-index behaviour. Verify on the deployed preview before adding rules
+# here: Cloudflare's handling of that case is a project setting, not something this
+# file can express portably, and a speculative wildcard would either do nothing or
+# rewrite asset paths that legitimately end in a filename.
+#
+# If Search Console later reports /…/index.html duplicates, the fix is the Pages
+# setting "Project -> Build & deploy -> Trailing slash", not a line here.
+
+# To send an old site's URLs here, one line each:
+# /old-page          /            301
