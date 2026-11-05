@@ -13,12 +13,15 @@ npm run wp:data     备份的 SQL dump  -> data/wp-*.json（结构化内容）
 npm run mirror      页面缓存 + 归档资源 -> dist/
 npm run check       校验产物（部署门禁，失败退出码 1）
 npm run verify      mirror + check
-npm test            URL 改写逻辑的单元测试
+npm test            URL 改写与内容改动的单元测试
 npm run preview     本地起 dist/
-npm run deploy      verify 后用 wrangler 发布到 Cloudflare Pages
 ```
 
-`node tools/mirror.mjs --site-origin https://your-domain.com` 换目标域名；`--dry` 只统计不写盘。
+没有 `deploy` 脚本：发布靠推到 GitHub，Pages 从仓库取产物（见下）。
+
+`node tools/mirror.mjs --site-origin https://your-domain.com` 换目标域名；
+`--language-floater top-right|top-left|bottom-right|bottom-left` 换语言浮层位置；
+`--whatsapp 13714286517` 换询盘按钮的号码（传空串则不改这些按钮）；`--dry` 只统计不写盘。
 
 ## 目录
 
@@ -68,3 +71,34 @@ work/                       临时物：解包的 1 GB docroot、解压后的 SQ
 - 双语结构齐备（根文档、`/en/`、sitemap、`_headers`、`404.html`）
 
 `404.html` 用首页自己的 header/footer 拼装（原站从未缓存 404 页），因此它不是复刻、是补作 —— 站点名从首页 `<title>` 后缀取，不硬编码。
+
+## 部署（GitHub → Cloudflare Pages）
+
+Pages 直接发布仓库里的 `dist/`，**不跑构建**。这不是偷工，而是唯一选项：mirror 的输入是 `work/` 里解包的 1.9 GB 站点目录和 `24.4.22-tftstar/` 里 396 MB 的备份，两者都不能也不应进仓库，所以 Pages 上无米可炊。
+
+因此 `dist/` 是**纳入版本控制的生成物**，发布流程就三步：
+
+```bash
+npm run verify            # 重建 + 门禁（失败就别推）
+git add -A && git commit  # 产物与工具一起提交
+git push                  # Pages 检测到新提交后自动部署
+```
+
+Pages 项目的设置（Create project → Git → 选 `zzydhj/starbillions`）：
+
+| 项 | 值 |
+| --- | --- |
+| Root directory | 仓库根（留空） |
+| **Build command** | **留空**（不能填 `npm run mirror`，那里没有构建输入） |
+| Output directory | `dist` |
+
+`_headers`、`_redirects`、`sitemap.xml`、`404.html` 都在 `dist/` 里，Pages 会直接生效；深层页面的 `…/index.html` 会自动去后缀，所以链接写 `/product/xxx/` 形式即可。
+
+## 与原站不同的两处（均为有意）
+
+复刻之外，站主明确要求过两个偏离，都集中在 `tools/lib/site-links.js`（偏好只写一份，构建器与门禁读同一处）：
+
+- **语言浮层**：原位置 `trp-bottom-right` 在手机上正好盖住底部菜单项，改为 `trp-top-right`。做法是换 TranslatePress 自己的位置类，不是写 CSS 覆盖 —— 插件的 `.trp-top-right` 规则在源码顺序上晚于 `:hover` 规则，同特异度下后来者赢，不需要 `!important`。
+- **询盘按钮**：产品页那 68 个（中英各 34）原本指向 `starbillions.cn` 的联系页（第三个域名），改为 `https://wa.me/8613714286517`。只按按钮可见文案匹配，所以改文案就会安全地不再命中；其余“联系我们”类链接一律未动。
+
+这两条在 `npm run check` 里有对应断言，且**源计数为 0 直接算失败**，免得重建把它们弄丢后门禁反而绿灯。
