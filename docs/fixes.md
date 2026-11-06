@@ -57,7 +57,7 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 | --- | --- | --- |
 | 3 个 `<link>` 字体 | `fonts.googleapis.com` / `fonts.gstatic.com` | 中国大陆无法访问，字体退化到 Arial |
 | 首页地图 `<iframe>` | `maps.google.com` | 大陆打不开，该区域空白 |
-| 首页 Elementor 横幅背景图 | `starbillions.cn/wp-content/uploads/2023-11-10001*.png` | 证书 `ERR_CERT_COMMON_NAME_INVALID`，且该文件在本备份里不存在 → 横幅无背景 |
+| ~~首页 Elementor 横幅背景图~~ | `starbillions.cn/wp-content/uploads/2023/11/10001*.png` | 证书 `ERR_CERT_COMMON_NAME_INVALID`，横幅无背景。**本文早前说“该文件在本备份里不存在”是错的**：四个文件（`10001.jpg` 92 KB、`10001.png` 29 KB、`10001-1.png` 29 KB、`10001-2.jpg` 19 KB）都在 `wp-content/uploads/2023/11/` 里，同一相对路径。修法是把这 4 个 `url()` 改指向本地副本，不是“无图可用”——待做 |
 | ~~手机端底部工具栏~~ | `starbillions.savetime.work` | **已于 2026-11-06 在构建期重写**（`tools/lib/site-links.js` 的 `replaceMobileToolbar`）：3 项改为 电话 `tel:+8613714286517` / 产品中心 `/产品中心/` / 联系我们 `/联系我们/`，英文页对应 Call / Products / Contact。第 2、3 项原本图标容器为空（齿轮是 `.wd-icon` 基类回退），现用 `public/icons/` 里两个自绘 SVG。原数据来自 Woodmart 主题选项“Bottom toolbar”，不是镜像造成 |
 
 **建议**：字体改为自托管（备份里 `wp-content/uploads/` 有 google-fonts 缓存目录可考虑启用）、地图换高德/百度静态图或直接删掉 iframe、两处残留域名替换为正式域名。
@@ -74,21 +74,33 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 | 首页“热门产品分类”4 个页签 | `admin-ajax.php?action=woodmart_get_products_tab_shortcode` | **仍坏**：HTML 里只预渲染了当前页签（实测 `wd-tab-content-wrapper=1`、面板=1，而页签有 4 个），点其余 3 个只看到转圈后空白 |
 | 分类页价格筛选 | `?min_price=&max_price=` + AJAX | **仍坏**：9 处控件，筛选结果需要服务端查询 |
 | 加载更多 / 产品轮播分页 | `woodmart_get_products_*` | **仍坏** |
-| ~~联系表单（metform）~~ | `POST /wp-json/metform/v1/entries/insert/16312` | **已修（2026-11-06）**：表单删除，217 处统一换成跳 WhatsApp 的按钮（见下）|
+| ~~联系表单（metform）~~ | `POST /wp-json/metform/v1/entries/insert/16312` | **已修（2026-11-06）**：表单删除，每页统一换成跳 WhatsApp 的按钮（当前 137 页，删演示内容前是 217 页，见下）|
 | 加入购物车 / 收藏 / 对比 | `?wc-ajax=`、`admin-ajax.php` | 按站主决定主动去除（仅界面，无后端） |
 
 页签与筛选若要修，做法与搜索同理：构建时把各页签/各筛选组合的产品列表预先渲染进去，再把主题 JS 改成本地切换。
 
-~~联系表单~~ —— **已于 2026-11-06 移除**（`replaceContactForm`）。原表单 POST 到 `/wp-json/metform/v1/entries/insert/16312`，静态主机无法应答：访客填完、点发送，**既没提示成功也没报错**。现在统一换成一个跳 WhatsApp 的按钮，共 217 处：211 页是 Elementor widget（`elementor-widget-metform`，来自共享模板），另外 6 页是 metform 自己的页面（插件直接输出 `mf-form-wrapper`，无 widget 包裹）——只切外层会漏掉这 6 页。按钮复用站点自己的 `elementor-button elementor-button-link elementor-size-sm` 结构，所以外观由主题拥有。metform 脚本故意保留加载：没容器就不渲染任何东西，删标签会弄动构建器与缓存比对的引用计数，却没有任何可见收益。
+~~联系表单~~ —— **已于 2026-11-06 移除**（`replaceContactForm`）。原表单 POST 到 `/wp-json/metform/v1/entries/insert/16312`，静态主机无法应答：访客填完、点发送，**既没提示成功也没报错**。现在统一换成一个跳 WhatsApp 的按钮：有页就有一个按钮（构建报告当前计 137 处，删演示内容前是 217 处）。其中绝大多数页是 Elementor widget（`elementor-widget-metform`，来自共享模板），另有几页是 metform 自己的页面（插件直接输出 `mf-form-wrapper`，无 widget 包裹）——只切外层会漏掉这几页。按钮复用站点自己的 `elementor-button elementor-button-link elementor-size-sm` 结构，所以外观由主题拥有。metform 脚本故意保留加载：没容器就不渲染任何东西，删标签会弄动构建器与缓存比对的引用计数，却没有任何可见收益。
 
 底部工具栏那一行：站主 2026-11-05 先选择不动，2026-11-06 改口要求修复，于是做成了构建期规则（`replaceMobileToolbar` + `MOBILE_TOOLBAR` 表），这样重建不会洗掉。后台主题选项里改仍然是更根本的做法——镜像里的规则只是把站主已确认的偏好固化下来。门禁 `check.mjs` 7c 用幂等性断言：对已发布页面重跑一次替换必须**一字不差且仍找到 1 个栏**，这样检查器不需要自己再解析一遍区域就能证明产物等于诉求。
 
 ---
 
-## 四、演示内容未替换
+## 四、演示内容 —— **已于 2026-11-06 整片删除（共 80 页）**
 
-- 博客 8 篇为 Woodmart 主题示例文章（"Minimalist Japanese Inspired Furniture"、"New Home Decor from John Doerson" 等），与显示屏业务无关。中英各一份，共 16 页。
-- Instagram 链接指向 `instagram.com/ozdesignfurniture`（主题演示账号，全站约 180 处）。
+站主选择“删掉最干净”。一个清单 `OWNER_REMOVED_SECTIONS`（`tools/ingest/wp/staticize.js`）同时决定“不构建”与“摘链接”，另加 `removeOwnerMenuItems` 把页头菜单项整块 `li` 摘掉。删的四类：
+
+| 内容 | 路径 | 证据 |
+| --- | --- | --- |
+| Woodmart 示例文章 | `/2021/08/26/<slug>/`、`/en/2021/08/27/<slug>/` 中英各 8 | 日本家具 / John Doerson / 亚特兰大住宅，与显示屏无关 |
+| 只用来列它们的归档 | `/blog/`、`/category/`、`/tag/`、`/author/` 中英共 30 | 文章一走就是空壳 |
+| 示例案例 | `/portfolio/`（中英各 10）+ `/project-cat/`（各 5） | 标题全是拉丁填充；它们是全站仅剩 40 处 `starbillions.savetime.work` 引用的宿主，其中 8 页把 PHP `file_get_contents` Warning 打进了正文 |
+| WordPress 示例页 / 横幅归档 | `/sample-page/`、`/woodmart_slider/123/` | 前者是“我白天是个邮递员…”，后者渲染为“什么都没找到”；两者在 sitemap 里且无人链接 |
+
+产物从 217 页降到 **137 页**（754 个文件 / 190 MB），菜单从 6 项降到 **4 项**（首页 / 产品中心 / 关于我们 / 联系我们）。门禁三项绝对断言：无演示页与空归档、无链接指向被删内容且菜单无待切项、留下的主菜单页数与项数均对得上（4 项，无空 href 项）。`savetime` 也从“info 计数”升级为**绝对断言：0 页**。
+
+浏览器实测（只读，未改 DOM）：中英菜单各 4 项且 href 全 200；`/blog/`、`/portfolio/`、`/sample-page/`、示例文章 URL 均返回**站点自有的 404 页**（非空白）；产品中心网格 16 个可见卡片、`wd_shop_archive_*` 零残留；底部栏三个图标 computed color 全为 `rgb(51,51,51)`、尺寸均 20×20。
+
+顺手修正两件事：`starbillions.savetime.work` 现在**零页**（已成绝对断言），演示账号 `instagram.com/ozdesignfurniture` 也随这些页一起消失了——产物里剩下的 “instagram” 字样共 19 处，全部在第三方库内部（`chaty-pro` 的号码→图标映射、Font Awesome 的 `.fa-instagram` 类名），不是链接。
 
 ---
 
@@ -96,13 +108,13 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 
 ### 1. 104 个链接目标原站从未渲染过
 
-`wp-content/cache/wp-rocket/` 只存**有人访问过**的页面。归档页、标签页、搜索结果页、部分分类分页没被缓存，镜像里指向它们的链接会落到 `404.html`。当前 104 个不同目标，明细见 `work/mirror-report.json` 的 `uncachedLinkTargets` 字段。
+`wp-content/cache/wp-rocket/` 只存**有人访问过**的页面。归档页、标签页、搜索结果页、部分分类分页没被缓存，镜像里指向它们的链接会落到 `404.html`。当前 **69** 个不同目标（删掉演示内容前是 104），明细见 `work/mirror-report.json` 的 `uncachedLinkTargets` 字段。
 
-### 2. 博客文章共 16 页（中英各 8），全部是演示内容
+### 2. ~~博客文章共 16 页（中英各 8），全部是演示内容~~ —— 已于 2026-11-06 删除（见上）
 
 镜像产物里博客位于 `/2021/08/26/<slug>/` 与 `/en/2021/08/26/<slug>/`。已核实三者一致：页面 `canonical`、镜像目录结构、数据库当前 permalink `/%year%/%monthnum%/%day%/%postname%/` **都是同一形式**，所以不存在"改过固定链接导致旧链接 404"的问题，`_redirects` 不需要为博客加任何映射。（早期我按一份探测输出的横杠式路径写下过相反结论，那是错的，已用产物实测纠正。）
 
-要处理的只是内容本身：这 8 篇文章是 Woodmart 主题示例（家具、家居装饰、亚特兰大住宅…），与显示屏业务无关，建议删除或换成真实内容。
+**这个错我又犯了一次，而且这次更隐蔽。** 写 `isOwnerRemoved` 时我把规则写成了匹配横杠式路径，测试数据也按同一个误解写，于是代码与测试自洽、全绿，**却一页都没删掉**——是构建后拿 `dist` 实测才看到 16 个日期归档页还在。原因：控制台与编辑器会把 `/2021/08/26/` 与 `2021-08-26` **渲染成同一串**，所以光看输出分辨不出来。定形要用 `path.split('/')` 看分段（或写 charCode 构造的 needle），不要看打印出的字符串。
 
 ### 3. 购物车、结算、登录、评论提交已按你的决定移除
 

@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, walk } from './lib/fs-utils.js';
-import { FLOATER_POSITIONS, ORIGIN_URLS, removeDeadShopControls, resolvesInOutput } from './ingest/wp/staticize.js';
+import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, isOwnerRemoved, removeDeadShopControls, removeOwnerMenuItems, resolvesInOutput } from './ingest/wp/staticize.js';
 import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRE_LABELS, MOBILE_TOOLBAR, replaceMobileToolbar } from './lib/site-links.js';
 import { discover } from './mirror.mjs';
 
@@ -156,7 +156,15 @@ const SCRIPT_TAG = /<script\b[^>]*type=["']?rocketlazyloadscript["']?[^>]*>/gi;
 const LINK_TAG = /<link\b[^>]*rel=["']?stylesheet["']?[^>]*>/gi;
 const LAZY_IMG = /<img\b[^>]*data-wood-src=[^>]*>/gi;
 
-const sourceTexts = discover(paths.pageCache).map((page) => readFileSync(page.file, 'utf8'));
+/**
+ * Only the pages that are supposed to ship. 46 cached pages are the demo content the
+ * owner removed, and counting their references here would turn a deliberate deletion
+ * into a "references lost" failure - the same list the builder filters with, so the
+ * two can never disagree about what should exist.
+ */
+const sourceTexts = discover(paths.pageCache)
+  .filter((page) => !isOwnerRemoved(page.urlPath))
+  .map((page) => readFileSync(page.file, 'utf8'));
 const builtTexts = documents.map((doc) => doc.text);
 
 const counted = [
@@ -359,13 +367,21 @@ check(
 );
 
 /**
- * The same preview host also appears inside the 2021 theme-demo posts, in lorem
- * ipsum body text and in their images. That is the source site's own content, not a
- * mirror defect, and rewriting post bodies is not this build's call - so it is
- * counted and shown rather than failed on, where a reader can see it.
+ * The preview host used to survive in two places: the three bottom-bar items, fixed
+ * just above, and the body text and images of the theme's demo posts and portfolio
+ * items. Those pages are now deliberately not built, so there is nothing left to
+ * excuse and this is an absolute assertion - a page naming a host that is not this
+ * site is the very thing a mirror is supposed to have eliminated.
+ *
+ * Matched on the domain name rather than the full URL, because an entity-escaped or
+ * protocol-relative spelling of the same host is still the same defect.
  */
-const demoHost = documents.filter((doc) => doc.text.includes('starbillions.savetime.work'));
-notes.push(`  info  ${demoHost.length} page(s) name the author's old preview host in their body text (2021 theme-demo posts), left as the source wrote it`);
+const demoHost = documents.filter((doc) => doc.text.includes('savetime'));
+check(
+  'no page names the author\'s old preview host',
+  demoHost.length === 0,
+  `${demoHost.length} page(s): ${demoHost.slice(0, 3).map((doc) => doc.rel).join(', ')}`,
+);
 
 /* 7d. the footer's year and the menu items with a number for a URL ---------- */
 
@@ -491,6 +507,56 @@ if (fontManifest) {
 } else {
   notes.push(`  info  fonts still load from Google on ${remoteFonts.length} page(s) - npm run fonts has not been run`);
 }
+
+/* 7g. the demo content the owner removed is gone and nothing points at it --- */
+
+/**
+ * The theme shipped a set of lorem-ipsum posts (Japanese furniture, John Doerson,
+ * Atlanta homes) with the archives that existed only to list them and the header's
+ * 博客 entry beside them. The owner chose to delete all of it rather than ship a
+ * half-populated blog about a product the company does not sell.
+ *
+ * Three ways this edit fails quietly, so all three are asserted: the files can stay,
+ * a link can stay and point at a file that no longer exists, and the link can be
+ * stripped out of a menu item that is still on screen - which is a label that looks
+ * navigable and does nothing, the same defect the shop toolbar had.
+ *
+ * "Nothing left to cut" alone could also mean the cut ate the menu, so the surviving
+ * menu is counted: every page carrying the main menu must still carry the four items
+ * the site actually has, and none of their anchors may be href-less.
+ */
+const staleFiles = documents.filter((doc) => isOwnerRemoved(`/${doc.rel.replace(/index\.html$/, '')}`));
+// The section names come from the builder's own list, because a second copy of the
+// list here is a second source of truth: a section added to one and not the other
+// would either ship a page the gate thinks is gone, or fail on a page that is fine.
+const removedLink = new RegExp(`href="\/(?:en\/)?(?:${OWNER_REMOVED_SECTIONS.map((section) => section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')}\/?|\\d{4}\/)`, 'g');
+const staleLinks = documents
+  .map((doc) => [doc.rel, (doc.text.match(removedLink) || []).length])
+  .filter(([, count]) => count > 0);
+const itemsLeftToCut = documents.reduce((total, doc) => total + removeOwnerMenuItems(doc.text).removed, 0);
+const mainNavs = documents.filter((doc) => doc.text.includes('id="menu-main'));
+const thinNavs = documents.filter((doc) => doc.text.includes('id="menu-main')
+  && (doc.text.match(/class="menu-item /g) || []).length < 4);
+const hreflessNav = documents.filter((doc) => /<a\b(?![^>]*href=)[^>]*class="[^"]*woodmart-nav-link/.test(doc.text));
+
+check(
+  'no demo post or empty archive is shipped',
+  staleFiles.length === 0,
+  `${staleFiles.length} page(s) left: ${staleFiles.slice(0, 2).map((doc) => doc.rel).join(', ')}`,
+);
+check(
+  'nothing links into the removed content',
+  staleLinks.length === 0 && itemsLeftToCut === 0,
+  `${staleLinks.reduce((total, [, count]) => total + count, 0)} link(s) on ${staleLinks.length} page(s) still point there, ${itemsLeftToCut} menu item(s) left to cut`,
+);
+check(
+  'the menu that is left is the menu the site has',
+  mainNavs.length > 0 && thinNavs.length === 0 && hreflessNav.length === 0,
+  `${mainNavs.length} page(s) carry the main menu, ${thinNavs.length} too short, ${hreflessNav.length} with an inert item`,
+);
+
+const demoWords = documents.filter((doc) => />博客<|>Blog</.test(doc.text));
+if (demoWords.length) notes.push(`  info  ${demoWords.length} page(s) still say 博客 or Blog in their text (not as a link): ${demoWords.slice(0, 2).map((doc) => doc.rel).join(', ')}`);
 
 /* 8. the static search replaces the origin's AJAX one ------------------------- */
 

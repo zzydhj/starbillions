@@ -46,11 +46,13 @@ import {
   fileReferencesIn,
   internalUrl,
   isExcluded,
+  isOwnerRemoved,
   moveLanguageFloater,
   originSet,
   rebaseIdentityUrls,
   referencesIn,
   removeDeadShopControls,
+  removeOwnerMenuItems,
   rewriteReferences,
   rootifyOrigins,
   stripLanguagePrefix,
@@ -133,11 +135,18 @@ export async function build({ quiet = false } = {}) {
   const started = Date.now();
   const report = quiet ? () => {} : (label, detail) => console.log(`  ${label.padEnd(12)} ${detail}`);
 
-  const pages = discover(paths.pageCache).map((page) => ({
-    ...page,
-    outPath: toOutputPath(new URL(`https://tftstar.com${page.urlPath}`)),
-    pageUrl: `https://tftstar.com${page.urlPath}`,
-  }));
+  const cached = discover(paths.pageCache);
+  const pages = cached
+    // Content the owner decided not to ship is not built at all. The same predicate
+    // inside isExcluded removes the links that pointed at it, so one list governs
+    // both halves and they cannot disagree about what exists.
+    .filter((page) => !isOwnerRemoved(page.urlPath))
+    .map((page) => ({
+      ...page,
+      outPath: toOutputPath(new URL(`https://tftstar.com${page.urlPath}`)),
+      pageUrl: `https://tftstar.com${page.urlPath}`,
+    }));
+  const notBuilt = cached.length - pages.length;
 
   /**
    * Pages whose own canonical link disagrees with the directory holding them.
@@ -238,7 +247,7 @@ export async function build({ quiet = false } = {}) {
   let written = 0;
   let copied = 0;
   let homeHtml = '';
-  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0, formsReplaced: 0, mapsReplaced: 0, fontsLocal: 0, fontsMissing: 0 };
+  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0, formsReplaced: 0, mapsReplaced: 0, fontsLocal: 0, fontsMissing: 0, demoMenuItems: 0 };
   // Written by npm run fonts. An absent manifest is a normal state - the mirror has
   // no network step - so it reads as "keep the original links", not as an error.
   const fontManifestPath = join(paths.public, 'fonts', 'manifest.json');
@@ -253,7 +262,13 @@ export async function build({ quiet = false } = {}) {
     const text = readFileSync(page.file, 'utf8');
     const rebased = rebaseIdentityUrls(text, origins, siteOrigin);
 
-    const out = rewriteReferences(rebased, {
+    // Menu items for removed content are cut whole, while their href can still be
+    // recognised; the URL pass below would only strip the attribute and leave an
+    // inert label in the header.
+    const demenued = removeOwnerMenuItems(rebased);
+    stats.demoMenuItems += demenued.removed;
+
+    const out = rewriteReferences(demenued.html, {
       pageUrl: page.pageUrl,
       origins,
       /**
@@ -398,6 +413,7 @@ export async function build({ quiet = false } = {}) {
   console.log(`  enquiry        ${stats.inquireLinks} buttons -> ${whatsapp || '(left as they were)'}`);
   console.log(`  shop toolbar   ${stats.shopControls} dead control(s) removed, ${stats.cards} product cards kept`);
   console.log(`  contact form   ${stats.formsReplaced} form(s) replaced by a WhatsApp button, ${stats.mapsReplaced} map(s) by the address`);
+  console.log(`  demo content   ${notBuilt} page(s) not built, ${stats.demoMenuItems} menu item(s) cut with them`);
   console.log(`  fonts          ${stats.fontsLocal} link(s) local, ${stats.fontsMissing} not in the manifest${Object.keys(fontManifest).length ? '' : ' (npm run fonts has not been run)'}`);
   console.log(`  mobile bar     ${stats.mobileBars} bar(s) rebuilt from the owner's entries`);
   console.log(`  stale bits     ${stats.copyrightYears} page(s) re-dated, ${stats.menuLinks} menu link(s) routed, ${stats.menuHrefsDropped} heading(s) unlinked, ${stats.titlesFixed} English title(s) fixed`);

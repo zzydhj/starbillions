@@ -90,9 +90,115 @@ export function internalUrl(raw, origins, base = ORIGIN_URLS[0]) {
   return origins.has(url.origin) ? url : null;
 }
 
+/**
+ * Content the owner decided not to ship - kept apart from EXCLUDED_PREFIXES because
+ * the two lists answer different questions. "Could this ever be a file" is a fact
+ * about WordPress; "does this site want it" is a decision, and someone reading the
+ * first list should not have to guess which entries are editorial.
+ *
+ * The date-shaped pages are the theme's demo posts (Japanese furniture, John
+ * Doerson, Atlanta homes) - lorem ipsum with no bearing on displays. Once they go,
+ * the archives that existed only to list them are empty shells, and so is the
+ * header's 博客 entry, so all of it goes together.
+ *
+ * The post URLs are /YYYY/MM/DD/slug/, which is this site's permalink structure as
+ * the cache directory layout proves it. Matching only the hyphenated form reads the
+ * same on screen - a display collapses `/2021/08/26/` into `2021-08-26` - and does
+ * not match a single real page, which is how a rule can look written and tested and
+ * still ship the whole demo tree.
+ *
+ * /product-category/ is deliberately not caught by the `category` section: the
+ * comparison is anchored at the start of the path, and the shop's real categories
+ * are the business of this site. Anchoring matters the same way for the dates - an
+ * upload path carries year and month segments too.
+ *
+ * The other sections are the same demo theme in a different post type, measured
+ * rather than assumed: every /portfolio/ title is Latin filler ("A lacus bibendum
+ * pulvinar"), their images are the only thing still naming the author's preview
+ * host, and 8 of them print a PHP file_get_contents warning into their own body.
+ * /project-cat/ lists nothing else. /sample-page/ is WordPress's placeholder page
+ * ("I'm a postman by day, an aspiring actor by night"), and /woodmart_slider/123/
+ * renders "nothing found" - both sit in the sitemap with no link pointing at them.
+ *
+ * Kept, because they are features rather than filler: /compare/ and /wishlist/ are
+ * the WooCommerce tool pages the header icons lead to, and /metform-form/ is now a
+ * WhatsApp button.
+ */
+export const OWNER_REMOVED_SECTIONS = [
+  'blog', 'category', 'tag', 'author',
+  'portfolio', 'project-cat',
+  'sample-page', 'woodmart_slider',
+];
+
+export function isOwnerRemoved(pathname) {
+  // One leading language directory is stripped, because the English tree mirrors the
+  // same sections under /en/ and both halves are removed together.
+  const clean = decodeURIComponent(pathname).replace(/^\/+/, '').replace(/^en\//, '');
+
+  if (OWNER_REMOVED_SECTIONS.some((section) => clean.startsWith(`${section}/`) || clean === section)) return true;
+
+  // /2021/, /2021/08/ and /2021/08/26/ are the year, month and day archives of the
+  // same removed posts, so they go with the posts rather than standing empty.
+  return /^\d{4}(\/\d{2}){0,2}(\/|$)/.test(clean);
+}
+
+/**
+ * Drop whole menu items that lead to removed content, before the URL pass runs.
+ *
+ * rewriteReferences deletes the href of an excluded link, which is right for a
+ * "购物车" button whose chrome can stay and wrong for a navigation entry: the header
+ * would keep an inert 博客 label that looks like a menu item and does nothing. The
+ * whole <li> has to go, and it can only be recognised while its href is still there -
+ * after the URL pass there is nothing left to match on.
+ *
+ * Only items whose own link is removed content are dropped, and then the whole
+ * subtree with them: a "博客" entry pointing at /blog/ has children that are the
+ * demo posts, so removing the label and leaving an empty submenu behind would be
+ * half an edit. An item whose own link is still live is kept even when a child is
+ * removed, which is what protects a real parent in the mega menu.
+ */
+export function removeOwnerMenuItems(html) {
+  let output = html;
+  let removed = 0;
+
+  for (;;) {
+    const at = findRemovableItem(output);
+    if (at === -1) break;
+
+    const end = matchingClose(output, at, 'li');
+    output = output.slice(0, at) + output.slice(end);
+    removed += 1;
+  }
+
+  return { html: output, removed };
+}
+
+function findRemovableItem(html) {
+  const pattern = /<li\b[^>]*class="[^"]*menu-item[^"]*"[^>]*>/gi;
+
+  for (const match of html.matchAll(pattern)) {
+    const block = html.slice(match.index, matchingClose(html, match.index, 'li'));
+
+    const href = /<a\b[^>]*href="([^"]*)"/i.exec(block)?.[1];
+    if (!href) continue;
+
+    let pathname;
+    try {
+      pathname = new URL(href, ORIGIN_URLS[0]).pathname;
+    } catch {
+      continue;
+    }
+
+    if (isOwnerRemoved(pathname)) return match.index;
+  }
+
+  return -1;
+}
+
 export function isExcluded(url) {
   const pathname = decodeURIComponent(url.pathname);
   if (EXCLUDED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return true;
+  if (isOwnerRemoved(pathname)) return true;
 
   // RSS hangs off nearly every URL on a WordPress site, including /comments/feed/
   // and the per-post feeds, none of which start with /feed/. They are links to a

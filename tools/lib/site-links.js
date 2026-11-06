@@ -135,10 +135,14 @@ function decodeEntities(text) {
 /**
  * The English pages whose browser tab still reads a Chinese page name.
  *
- * Ten of the 108 English pages have a Chinese string where the page name should be.
- * Most of those strings the site already publishes in English elsewhere - its own
+ * A handful of the English pages have a Chinese string where the page name should
+ * be. Most of those strings the site already publishes in English elsewhere - its own
  * English menu says "Serial screen" and "adapter board", and the WordPress defaults
  * arrive in English - so those are transcriptions, not translations.
+ *
+ * The table names only pages that ship. Two of the original ten, the placeholder page
+ * and the slider archive, were demo content and are not built at all, so translating
+ * their titles would have been polishing a page nobody can reach.
  *
  * The company suffix is deliberately kept in Chinese on every page: it is the
  * registered name, and the mirror contains no English legal name to substitute.
@@ -157,8 +161,6 @@ export const EN_PAGE_TITLES = {
   'en/product-category/qspi屏测试板/index.html': 'QSPI Screen Test Board',
   'en/metform-form/在线留言/index.html': 'Online Message',
   'en/metform-form/联系表单2/index.html': 'Contact Form 2',
-  'en/sample-page/index.html': 'Sample Page',
-  'en/woodmart_slider/123/index.html': 'Home Banner',
 };
 
 /**

@@ -16,9 +16,11 @@ import {
   internalUrl,
   isAssetPath,
   isExcluded,
+  isOwnerRemoved,
   moveLanguageFloater,
   originSet,
   removeDeadShopControls,
+  removeOwnerMenuItems,
   rebaseIdentityUrls,
   referencesIn,
   resolvesInOutput,
@@ -337,4 +339,65 @@ test('removeDeadShopControls is idempotent and quiet when the page has no toolba
   const withTwo = '<div class="elementor-element elementor-widget-wd_shop_archive_view"><a class="shop-view per-row-3"></a></div>';
   const once = removeDeadShopControls(withTwo).html;
   assert.equal(removeDeadShopControls(once).html, once, 'running it twice changes nothing further');
+});
+
+test('isOwnerRemoved catches the demo posts and the archives that only listed them', () => {
+  // The post paths are the shape the cache directory tree actually has, taken from
+  // the mirror's own input rather than written from memory of a permalink setting.
+  for (const path of ['/blog/', '/blog', '/category/furniture/', '/tag/x/', '/author/starbillions/',
+    '/2021/08/26/minimalist-japanese-inspired-furniture/',
+    '/2021/08/27/exploring-atlantas-modern-homes/',
+    '/2021/', '/2021/08/', '/2021/08/26/',
+    '/en/blog/', '/en/category/furniture/', '/en/2021/08/26/some-post/', '/en/2024/',
+    '/portfolio/a-lacus-bibendum-pulvinar/', '/en/portfolio/', '/project-cat/furniture/',
+    '/sample-page/', '/en/sample-page/', '/woodmart_slider/123/']) {
+    assert.equal(isOwnerRemoved(path), true, `${path} is demo content`);
+  }
+
+  // The shop's own categories are the business of the site. So is an upload path,
+  // which carries year and month segments of its own - the date rule is anchored at
+  // the start of the path for exactly that reason. And so are the WooCommerce tool
+  // pages, which are features with a purpose rather than theme filler.
+  for (const path of ['/', '/en/', '/product/x/', '/product-category/furniture/',
+    '/en/product-category/串口屏/', '/产品中心/', '/联系我们/',
+    '/metform-form/在线留言/',
+    '/compare/', '/wishlist/', '/en/compare/',
+    '/wp-content/uploads/2021/08/26/pic.png', '/2020-tft-display/', '/product-category/2021-line/',
+    '/en/product-category/2024/']) {
+    assert.equal(isOwnerRemoved(path), false, `${path} is not demo content`);
+  }
+
+  // A section is removed as a section: its bare index goes as well as its items, so
+  // an archive listing the same filler cannot survive behind the item that left it.
+  assert.equal(isOwnerRemoved('/woodmart_slider/'), true);
+  assert.equal(isOwnerRemoved('/portfolio/'), true);
+
+  // The exclusion is one list, so the page builder and the link rewriter agree.
+  assert.equal(isExcluded(new URL('https://tftstar.com/blog/')), true);
+  assert.equal(isExcluded(new URL('https://tftstar.com/2021/08/26/minimalist-japanese-inspired-furniture/')), true);
+  assert.equal(isExcluded(new URL('https://tftstar.com/product-category/x/')), false);
+});
+
+test('removeOwnerMenuItems takes the dead entry with its subtree and keeps a live parent', () => {
+  const html = '<ul id="menu-main">' +
+    '<li class="menu-item menu-item-1"><a href="https://tftstar.com/blog/">博客</a></li>' +
+    '<li class="menu-item menu-item-2"><a href="https://tftstar.com/产品中心/">产品中心</a></li>' +
+    '<li class="menu-item menu-item-3 menu-item-has-children"><a href="/blog/">博客带子菜单</a>' +
+    '<ul class="sub-menu"><li class="menu-item"><a href="/2021/08/26/a">文章</a></li></ul></li>' +
+    '<li class="menu-item menu-item-4 menu-item-has-children"><a href="/产品中心/">真父项</a>' +
+    '<ul class="sub-menu"><li class="menu-item"><a href="/2021/08/26/b">混进来的文章</a></li>' +
+    '<li class="menu-item"><a href="/product-category/串口屏/">串口屏</a></li></ul></li>' +
+    '</ul>';
+
+  const { html: out, removed } = removeOwnerMenuItems(html);
+
+  // Two blog entries, each taking whatever hangs off them - leaving an empty submenu
+  // behind would be half an edit. Plus the one dead child under a parent that is
+  // itself live, which goes alone.
+  assert.equal(removed, 3);
+  assert.ok(!out.includes('博客'), 'the nav label is gone, not merely unlinked');
+  assert.ok(!out.includes('文章'), 'and the post links went with it');
+  assert.ok(!out.includes('混进来的文章'), 'a dead child under a live parent is still removed');
+  assert.match(out, /产品中心/, 'the real item is untouched');
+  assert.match(out, /串口屏/, 'and so are its live children');
 });
