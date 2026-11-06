@@ -424,6 +424,77 @@ export function fileReferencesIn(html) {
 }
 
 /**
+ * Decode a URL path without failing on a filename that contains a bare percent sign,
+ * which uploads written by hand do occasionally contain.
+ *
+ * Exported because the builder and this library's own rules must agree on what a
+ * reference decodes to: two tolerant decoders written separately is how one side
+ * looks up `100%20logo.png` while the other copies `100 logo.png`.
+ */
+export function safeDecode(text) {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Chunk filenames an already-copied script will ask for at run time.
+ *
+ * Elementor's webpack runtime carries a map from chunk id to file name inside the
+ * bundle loader itself, so a widget's behaviour can live in a file that not one page
+ * ever mentions by name - and which the page scan therefore never finds. Missing one
+ * is not invisible either: the browser logs a ChunkLoadError and that widget simply
+ * stops working, which is the kind of defect that reads as a broken theme.
+ *
+ * Only the hashed `.bundle.min.js` shape is matched. A bare `"something.js"` string
+ * occurs in ordinary code for unrelated reasons, and copying those would put files in
+ * the output that nothing asked for.
+ */
+export function jsChunkNames(text) {
+  return [...new Set((text.match(/["'][\w-]+\.[a-f0-9]{8,}\.bundle\.min\.js["']/g) || [])
+    .map((name) => name.slice(1, -1)))];
+}
+
+/**
+ * Hosts the company owns that are not this site.
+ *
+ * `starbillions.cn` is the owner's older domain, and Elementor baked the homepage
+ * banner's background images as absolute URLs to it. That host answers with an
+ * invalid certificate, so every visitor saw a banner with no background - the defect
+ * is not specific to any country. The same bytes are in the backup at the same paths,
+ * so pointing at them is a pointer, not a substitution of someone's artwork.
+ */
+export const OWNER_FOREIGN_HOSTS = ['starbillions.cn'];
+
+/**
+ * Point a stylesheet at our own copy of a file the mirror already has.
+ *
+ * A page pass cannot see inside a stylesheet, and WordPress writes absolute URLs into
+ * the CSS Elementor generates per post, so these references survive every page rule.
+ *
+ * A URL is only rewritten when `available` says the bytes are here. Leaving the
+ * original text in place otherwise is deliberate: pointing at a path we did not ship
+ * trades a broken cross-domain image for a broken same-domain one, and the second one
+ * is harder to explain.
+ */
+export function localizeCssAssetUrls(text, { hosts = OWNER_FOREIGN_HOSTS, available = () => false } = {}) {
+  const escaped = hosts.map((host) => host.replace(/\./g, '\\.'));
+  const pattern = new RegExp(`url\\(\\s*['"]?https?:\\/\\/(${escaped.join('|')})\\/([^'")?#]+)(?:[^'")]*)?['"]?\\s*\\)`, 'gi');
+
+  const local = new Set();
+  const output = text.replace(pattern, (tag, _host, path) => {
+    const rel = `/${safeDecode(path)}`;
+    if (!available(rel)) return tag;
+    local.add(rel);
+    return `url(${rel})`;
+  });
+
+  return { text: output, local: [...local] };
+}
+
+/**
  * Move TranslatePress's floating language switcher to a chosen screen corner.
  *
  * The switcher is `#trp-floater-ls`, fixed to a corner by one of four classes the

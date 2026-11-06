@@ -6,7 +6,7 @@
  * These run with no server and no database, which is the point: where a URL lands
  * on disk, which links must disappear, and how head metadata differs from an
  * ordinary link are the expensive decisions to get wrong, and all three are pure.
- * A 217-page mirror cannot be debugged by eye afterwards.
+ * A mirror of a few hundred pages cannot be debugged by eye afterwards.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,6 +17,8 @@ import {
   isAssetPath,
   isExcluded,
   isOwnerRemoved,
+  jsChunkNames,
+  localizeCssAssetUrls,
   moveLanguageFloater,
   originSet,
   removeDeadShopControls,
@@ -376,6 +378,45 @@ test('isOwnerRemoved catches the demo posts and the archives that only listed th
   assert.equal(isExcluded(new URL('https://tftstar.com/blog/')), true);
   assert.equal(isExcluded(new URL('https://tftstar.com/2021/08/26/minimalist-japanese-inspired-furniture/')), true);
   assert.equal(isExcluded(new URL('https://tftstar.com/product-category/x/')), false);
+});
+
+test('jsChunkNames finds the hashed chunk files a loader asks for, and nothing else', () => {
+  const runtime = 'webpackChunkElementorFrontend.push([[""],{123:(e,t,n)=>{'
+    + 'n.p+="text-editor.2c35aafbe5bf0e127950.bundle.min.js";'
+    + 'n.p+="text-editor.2c35aafbe5bf0e127950.bundle.min.js";'
+    + 'n.p+="lightbox.776e1a0c9c991a41f1c6.bundle.min.js";'
+    + '}}]);';
+
+  assert.deepEqual(jsChunkNames(runtime), [
+    'text-editor.2c35aafbe5bf0e127950.bundle.min.js',
+    'lightbox.776e1a0c9c991a41f1c6.bundle.min.js',
+  ], 'duplicated names collapse, unhashed code does not become an asset');
+
+  // A plain ".js" string is ordinary code - a plugin name, a message - and copying on
+  // the strength of it would put files in the output nothing ever asked for.
+  assert.deepEqual(jsChunkNames('var a = "jquery.min.js";'), []);
+});
+
+test('localizeCssAssetUrls points at a local copy only when the bytes are here', () => {
+  const css = '.el-1{background:url("https://starbillions.cn/wp-content/uploads/2023/11/10001.png")} '
+    + '.el-2{background:url(https://starbillions.cn/wp-content/uploads/2023/11/gone.png)} '
+    + '.el-3{background:url(https://example.com/wp-content/uploads/2023/11/10001.png)} '
+    + '.el-4{background:url(/wp-content/uploads/2023/11/local.png)}';
+
+  const { text, local } = localizeCssAssetUrls(css, { available: (rel) => rel.endsWith('10001.png') });
+
+  assert.ok(text.includes('url(/wp-content/uploads/2023/11/10001.png)'), 'the file we hold is pointed locally');
+  assert.ok(text.includes('starbillions.cn/wp-content/uploads/2023/11/gone.png'), 'one we do not hold keeps its original text');
+  assert.ok(text.includes('example.com'), 'a host that is not the owner\'s other domain is not touched');
+  assert.ok(text.includes('url(/wp-content/uploads/2023/11/local.png)'), 'an already-local url is untouched');
+  assert.deepEqual(local, ['/wp-content/uploads/2023/11/10001.png']);
+
+  // Idempotence is asserted against the same availability: with an anything-goes
+  // predicate the second pass would rewrite the URL the first one deliberately left
+  // alone, which is not a change the function made but a change the fixture made.
+  const again = localizeCssAssetUrls(text, { available: (rel) => rel.endsWith('10001.png') });
+  assert.equal(again.text, text, 'running it twice changes nothing further');
+  assert.deepEqual(again.local, [], 'and the second pass finds nothing left to point');
 });
 
 test('removeOwnerMenuItems takes the dead entry with its subtree and keeps a live parent', () => {

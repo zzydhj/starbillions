@@ -47,6 +47,8 @@ import {
   internalUrl,
   isExcluded,
   isOwnerRemoved,
+  jsChunkNames,
+  localizeCssAssetUrls,
   moveLanguageFloater,
   originSet,
   rebaseIdentityUrls,
@@ -55,6 +57,7 @@ import {
   removeOwnerMenuItems,
   rewriteReferences,
   rootifyOrigins,
+  safeDecode,
   stripLanguagePrefix,
   toOutputPath,
 } from './ingest/wp/staticize.js';
@@ -179,10 +182,10 @@ export async function build({ quiet = false } = {}) {
     // lazy loading hides behind data-wood-src and Elementor inside data-settings
     // JSON, and an attribute list silently missed both.
     for (const reference of fileReferencesIn(text)) {
-      const path = safeDecode(reference);
+      const path = assetKey(safeDecode(reference));
       if (assets.has(path)) continue;
 
-      const present = exists(join(paths.docroot, path.replace(/^\/+/, '')));
+      const present = exists(join(paths.docroot, path));
       assets.set(path, present ? 'copy' : 'absent');
       if (!present) missingFiles.add(path);
     }
@@ -192,6 +195,8 @@ export async function build({ quiet = false } = {}) {
       const url = internalUrl(raw, origins, page.pageUrl);
       if (url === null || isExcluded(url)) continue;
 
+      // Not assetKey(): this is a page path, matched against knownPages, and those
+      // keys keep the leading slash the cache directories were named from.
       const path = safeDecode(decodeURIComponent(url.pathname));
       if (hasExtension(path)) continue;
 
@@ -212,10 +217,11 @@ export async function build({ quiet = false } = {}) {
    * directory in the output, so the reference stays correct without rewriting CSS.
    */
   const fromCss = new Set();
+  const cssRewrites = new Map();
   const copiedStylesheets = [...assets].filter(([, kind]) => kind === 'copy').filter(([path]) => path.endsWith('.css'));
 
   for (const [path] of copiedStylesheets) {
-    const text = readFileSync(join(paths.docroot, path.replace(/^\/+/, '')), 'utf8');
+    const text = readFileSync(join(paths.docroot, assetKey(path)), 'utf8');
 
     for (const match of text.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/gi)) {
       const raw = safeDecode(match[1].split('?')[0].split('#')[0]);
@@ -232,9 +238,60 @@ export async function build({ quiet = false } = {}) {
       if (!present) missingFiles.add(rel);
       else fromCss.add(rel);
     }
+
+    /**
+     * The case copying cannot reach: a url() WordPress wrote absolutely to another
+     * host. Elementor did exactly that for the homepage banner backgrounds, and the
+     * host is the owner's older domain, starbillions.cn, whose certificate does not
+     * validate - so the banner shipped as an empty coloured box for every visitor in
+     * every country. The identical bytes are in the backup at the identical path, which
+     * makes this a pointer rather than a substitution of someone's artwork. A url()
+     * naming a file we do not have keeps its original text: aiming at a hole we made is
+     * worse to explain than aiming at a host that at least has the picture.
+     */
+    const localized = localizeCssAssetUrls(text, {
+      available: (rel) => exists(join(paths.docroot, assetKey(rel))),
+    });
+    if (localized.text === text) continue;
+
+    cssRewrites.set(assetKey(path), localized.text);
+    for (const rel of localized.local) {
+      const key = assetKey(rel);
+      if (assets.has(key)) continue;
+      assets.set(key, 'copy');
+      fromCss.add(key);
+    }
+  }
+
+  /**
+   * Third hop: the chunks a copied script asks for by name at run time.
+   *
+   * Elementor's webpack runtime maps chunk ids to file names inside the loader, so no
+   * page and no stylesheet names these files - reading the script that asks for them is
+   * the only way to find out they are wanted. Their absence is not silent either: the
+   * browser logs a ChunkLoadError and that one widget stops working, which reads as a
+   * broken theme rather than a missing file.
+   */
+  const fromJs = new Set();
+  const copiedScripts = [...assets].filter(([, kind]) => kind === 'copy').filter(([path]) => path.endsWith('.js'));
+
+  for (const [path] of copiedScripts) {
+    const text = readFileSync(join(paths.docroot, assetKey(path)), 'utf8');
+
+    for (const name of jsChunkNames(text)) {
+      const key = assetKey(posixJoin(posixDirname(posixJoin('/', path)), name));
+      if (assets.has(key)) continue;
+
+      const present = exists(join(paths.docroot, key));
+      assets.set(key, present ? 'copy' : 'absent');
+      if (!present) missingFiles.add(key);
+      else fromJs.add(key);
+    }
   }
 
   report('from CSS', `${fromCss.size} files reachable only through a stylesheet url()`);
+  report('from JS', `${fromJs.size} chunk(s) a copied script asks for by name`);
+  report('other host', `${cssRewrites.size} stylesheet(s) rewritten to point at local copies`);
   report('assets', `${[...assets].filter(([, kind]) => kind === 'copy').length} to copy, ${missingFiles.size} referenced but absent`);
 
   if (dry) {
@@ -281,7 +338,7 @@ export async function build({ quiet = false } = {}) {
        * the original host too, since this file tree is the original host's.
        */
       classify: (url) => {
-        const path = safeDecode(decodeURIComponent(url.pathname));
+        const path = assetKey(safeDecode(decodeURIComponent(url.pathname)));
         if (hasExtension(path)) return assets.get(path) === 'copy' ? 'copy' : 'drop';
         return 'page';
       },
@@ -385,10 +442,15 @@ export async function build({ quiet = false } = {}) {
 
   const copies = [...assets].filter(([, kind]) => kind === 'copy').map(([path]) => path);
   await pool(copies, async (path) => {
-    const from = join(paths.docroot, path.replace(/^\/+/, ''));
-    const to = join(paths.dist, path.replace(/^\/+/, ''));
+    const key = assetKey(path);
+    const to = join(paths.dist, key);
     await mkdir(dirname(to), { recursive: true });
-    await copyFile(from, to);
+
+    // A stylesheet whose cross-domain url() was localised is written out, not copied:
+    // the file it points at only stops being a foreign host if this text changed too.
+    const rewrite = cssRewrites.get(key);
+    if (rewrite !== undefined) await writeFileAsync(to, rewrite, 'utf8');
+    else await copyFile(join(paths.docroot, key), to);
     copied += 1;
   });
 
@@ -443,15 +505,17 @@ function hasExtension(pathname) {
 }
 
 /**
- * Decode a URL path without failing on a filename that contains a bare percent
- * sign, which uploads written by hand do occasionally contain.
+ * The one form an asset key takes: forward-slashed, never leading-slashed.
+ *
+ * The page pass reads references out of attributes, where WordPress writes
+ * `/wp-content/...`, while the two follow-hops derive them from a stylesheet's or
+ * script's own directory, where they come out as `wp-content/...`. Two spellings of
+ * one file in one Map means `assets.has()` misses, the same file is registered twice,
+ * it is copied twice, and the "files to copy" count is inflated by whatever amount
+ * neither side can explain afterwards.
  */
-function safeDecode(text) {
-  try {
-    return decodeURIComponent(text);
-  } catch {
-    return text;
-  }
+function assetKey(pathname) {
+  return pathname.replace(/^\/+/, '');
 }
 
 /**

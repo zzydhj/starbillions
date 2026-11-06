@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, walk } from './lib/fs-utils.js';
-import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, isOwnerRemoved, removeDeadShopControls, removeOwnerMenuItems, resolvesInOutput } from './ingest/wp/staticize.js';
+import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadShopControls, removeOwnerMenuItems, resolvesInOutput } from './ingest/wp/staticize.js';
 import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRE_LABELS, MOBILE_TOOLBAR, replaceMobileToolbar } from './lib/site-links.js';
 import { discover } from './mirror.mjs';
 
@@ -557,6 +557,56 @@ check(
 
 const demoWords = documents.filter((doc) => />博客<|>Blog</.test(doc.text));
 if (demoWords.length) notes.push(`  info  ${demoWords.length} page(s) still say 博客 or Blog in their text (not as a link): ${demoWords.slice(0, 2).map((doc) => doc.rel).join(', ')}`);
+
+/* 7h. the two defects a browser reports only in its own console ------------- */
+
+/**
+ * Both of these were invisible in the build output, which is why they survived until
+ * someone opened devtools. Elementor's generated CSS pointed the homepage banner's
+ * backgrounds at the owner's older domain, whose certificate does not validate, so
+ * every visitor saw a banner with no picture; and Elementor's webpack runtime asks for
+ * hashed chunk files by a name no page or stylesheet mentions, so the widget threw
+ * ChunkLoadError and stopped working.
+ *
+ * The checks re-run the builder's own finders against the shipped files rather than
+ * counting numbers written down here, for the usual reason: a second copy of a rule is
+ * a rule that can drift, and drift in this direction looks like success.
+ */
+const foreignCss = [];
+const missingChunks = [];
+const bannerRefs = new Set();
+
+for (const file of files.filter((f) => /\.(?:css|js)$/.test(f.rel))) {
+  const text = readFileSync(file.abs, 'utf8');
+
+  // available: () => true means "there is still something here to point locally", so a
+  // stylesheet that was handled is left alone and one that was not is named.
+  if (file.rel.endsWith('.css')) {
+    if (localizeCssAssetUrls(text, { available: () => true }).text !== text) foreignCss.push(file.rel);
+    for (const match of text.matchAll(/url\(\s*['"]?(\/wp-content\/[^'"?)]*10001[^'")?]*)/gi)) bannerRefs.add(match[1]);
+  }
+
+  const dir = file.rel.slice(0, file.rel.lastIndexOf('/') + 1);
+  for (const name of jsChunkNames(text)) {
+    if (!known.has(`${dir}${name}`)) missingChunks.push(`${file.rel} -> ${dir}${name}`);
+  }
+}
+
+check(
+  'no stylesheet still points a file we ship at another domain',
+  foreignCss.length === 0,
+  `${foreignCss.length} file(s): ${foreignCss.slice(0, 2).join(', ')}`,
+);
+check(
+  'the banner backgrounds those stylesheets now name are in the output',
+  bannerRefs.size > 0 && [...bannerRefs].every((rel) => known.has(rel.replace(/^\/+/, ''))),
+  `${bannerRefs.size} reference(s), ${[...bannerRefs].filter((rel) => !known.has(rel.replace(/^\/+/, ''))).length} without a file`,
+);
+check(
+  'every chunk a copied script asks for by name was copied',
+  missingChunks.length === 0,
+  `${missingChunks.length} missing: ${missingChunks.slice(0, 2).join('; ')}`,
+);
 
 /* 8. the static search replaces the origin's AJAX one ------------------------- */
 

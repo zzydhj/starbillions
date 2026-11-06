@@ -57,10 +57,10 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 | --- | --- | --- |
 | 3 个 `<link>` 字体 | `fonts.googleapis.com` / `fonts.gstatic.com` | 中国大陆无法访问，字体退化到 Arial |
 | 首页地图 `<iframe>` | `maps.google.com` | 大陆打不开，该区域空白 |
-| ~~首页 Elementor 横幅背景图~~ | `starbillions.cn/wp-content/uploads/2023/11/10001*.png` | 证书 `ERR_CERT_COMMON_NAME_INVALID`，横幅无背景。**本文早前说“该文件在本备份里不存在”是错的**：四个文件（`10001.jpg` 92 KB、`10001.png` 29 KB、`10001-1.png` 29 KB、`10001-2.jpg` 19 KB）都在 `wp-content/uploads/2023/11/` 里，同一相对路径。修法是把这 4 个 `url()` 改指向本地副本，不是“无图可用”——待做 |
-| ~~手机端底部工具栏~~ | `starbillions.savetime.work` | **已于 2026-11-06 在构建期重写**（`tools/lib/site-links.js` 的 `replaceMobileToolbar`）：3 项改为 电话 `tel:+8613714286517` / 产品中心 `/产品中心/` / 联系我们 `/联系我们/`，英文页对应 Call / Products / Contact。第 2、3 项原本图标容器为空（齿轮是 `.wd-icon` 基类回退），现用 `public/icons/` 里两个自绘 SVG。原数据来自 Woodmart 主题选项“Bottom toolbar”，不是镜像造成 |
+| ~~首页 Elementor 横幅背景图~~ | `starbillions.cn/wp-content/uploads/2023/11/10001*` | **已于 2026-11-06 修好**（`localizeCssAssetUrls`）。本文早前说“该文件在本备份里不存在”是错的（错因见下）：四个文件（`10001.jpg` 92 KB、`10001.png` 29 KB、`10001-1.png` 29 KB、`10001-2.jpg` 19 KB）都在 `wp-content/uploads/2023/11/` 里，**相对路径完全相同**，所以这不是换图，是把指针从证书无效的旧域收回本站。4 个 Elementor 生成的 CSS 被重写，拷进产物的是重写后的文本而不是原件 |
+| ~~手机端底部工具栏~~ | `starbillions.savetime.work` | **已于 2026-11-06 在构建期重写**（`tools/lib/site-links.js` 的 `replaceMobileToolbar`）：3 项改为 电话 `tel:+8613714286517` / 产品中心 `/产品中心/` / 联系我们 `/联系我们/`，英文页对应 Call / Products / Contact。第 2、3 项原本图标容器为空（齿轮是 `.wd-toolbar-link .wd-tools-icon:before{content:"\f140"}` 在空容器上的默认字形），**图标现为内联 SVG + `fill="currentColor"`**（不是 `public/icons/` 里的文件，那两个已删——文件内部烤进去的颜色 CSS 无法调与）。原数据来自 Woodmart 主题选项“Bottom toolbar”，不是镜像造成 |
 
-**建议**：字体改为自托管（备份里 `wp-content/uploads/` 有 google-fonts 缓存目录可考虑启用）、地图换高德/百度静态图或直接删掉 iframe、两处残留域名替换为正式域名。
+**建议**：字体改为自托管（已提供 `npm run fonts`，本地无字体文件，必须下载）、地图已换为文字地址。旧域两处残留已分别处理：底部栏重写、横幅背景图指向本地副本（见上）。
 
 ---
 
@@ -126,6 +126,22 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 
 ---
 
-## 六、YITH 目录模式（说明，非缺陷）
+## 六、只在浏览器控制台里暴露的两处（2026-11-06 已修）
+
+这两处的共同点：**构建产物看起来完整、所有页面断言都绿**，但浏览器一打开就有错。它们都是“资源发现少走一跳”造成的，所以修的是发现器，不是个例文件。
+
+### 1. Elementor 的 webpack 分块从未被拷过
+
+`webpack.runtime.min.js` 里面带一张 chunk id → 文件名的表，因此这些 `名字.哈希.bundle.min.js` **既不出现在任何页面，也不出现在任何 CSS** —— 原有的两跳发现（页面属性、CSS `url()`）永远看不到它们。后果不是静默：浏览器报 `ChunkLoadError`，那个 widget 直接不工作（实测就是 text-editor 的容器块），看起来像主题坏了。现在第三跳会读每个已拷脚本里形如 `name.hash.bundle.min.js` 的字符串，按该脚本自己的目录解析后一并入库。实测：13 个分块全部命中备份，13 个全部拷进产物，控制台 `ChunkLoadError` 为 0。只匹配**带哈希的 `.bundle.min.js`**，因为裸 `"xxx.js"` 字符串在普通代码里太多，照单全收会拷一堆没人要的文件。
+
+### 2. 生成式 CSS 把本站资源写成了另一个域的绝对地址
+
+Elementor 每个 post 生一份 CSS，而 WordPress 写入时用的是**当时那个站的完整 URL**——首页横幅背景图被写成了 `https://starbillions.cn/...`（站主的旧域，证书 `ERR_CERT_COMMON_NAME_INVALID`）。页面级的域名改写看不到 CSS 内部，所以横幅以一块纯色输出。修法是 `localizeCssAssetUrls`：**只在备份里确实有同一相对路径的字节时**才改写，否则保留原样——把指针改到一个自己造的空路径，比指向一个至少有图的旧域更难解释。实测：4 个 CSS 被重写、横幅 `background-image` 已指向本站且 200 / 29 KB、全站 138 张图 0 破图、所有 cssRules 里 `starbillions.cn` 为 0。
+
+上面那行“该文件在备份里不存在”的旧结论，错因与本文第五节的路径坑同一个：`uploads/2023/11/10001.png` 与 `uploads/2023-11-10001.png` 在屏幕上看起来一模一样，而探测脚本按后者拼路径去 `existsSync`，当然找不到。这次是先拿 `split('/')` 看了分段，才发现四个文件一直都在。
+
+---
+
+## 七、YITH 目录模式（说明，非缺陷）
 
 产品页**没有价格和"加入购物车"按钮**，这是原站启用 `yith-woocommerce-catalog-mode-premium` 的设计（纯展示目录），不是复刻遗漏。
