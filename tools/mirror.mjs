@@ -39,8 +39,8 @@ import { copyFile, mkdir, writeFile as writeFileAsync } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { dirname as posixDirname, join as posixJoin, resolve as posixResolve } from 'node:path/posix';
 import { paths } from './lib/paths.js';
-import { exists, removeTree } from './lib/fs-utils.js';
-import { ENQUIRE_LABELS, ENQUIRY_PHONE, CONTACT_FORM_LABELS, MOBILE_TOOLBAR, enableStaticSearch, replaceContactForm, replaceMobileToolbar, repairMenuLinks, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './lib/site-links.js';
+import { exists, removeTree, copyTree } from './lib/fs-utils.js';
+import { ENQUIRE_LABELS, ENQUIRY_PHONE, CONTACT_FORM_LABELS, MOBILE_TOOLBAR, enableStaticSearch, localizeGoogleFonts, replaceContactForm, replaceMapWithAddress, replaceMobileToolbar, repairMenuLinks, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './lib/site-links.js';
 import { buildSearchIndex } from './ingest/wp/search-index.js';
 import {
   fileReferencesIn,
@@ -238,7 +238,11 @@ export async function build({ quiet = false } = {}) {
   let written = 0;
   let copied = 0;
   let homeHtml = '';
-  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0, formsReplaced: 0 };
+  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0, formsReplaced: 0, mapsReplaced: 0, fontsLocal: 0, fontsMissing: 0 };
+  // Written by npm run fonts. An absent manifest is a normal state - the mirror has
+  // no network step - so it reads as "keep the original links", not as an error.
+  const fontManifestPath = join(paths.public, 'fonts', 'manifest.json');
+  const fontManifest = exists(fontManifestPath) ? JSON.parse(readFileSync(fontManifestPath, 'utf8')) : {};
   // Inputs for the search index, gathered while writing rather than re-read from disk:
   // the index must describe the pages that were actually shipped, not the cache files
   // they came from.
@@ -310,12 +314,21 @@ export async function build({ quiet = false } = {}) {
       label: page.urlPath.startsWith('/en/') ? CONTACT_FORM_LABELS.en : CONTACT_FORM_LABELS.zh,
     });
 
+    // The map iframe is Google, which does not answer in the visitors' country; the
+    // address is already in the iframe's own title, per language, so nothing is
+    // invented by dropping the embed and keeping the words.
+    const mapped = replaceMapWithAddress(form.html);
+
+    // Only rewrites when npm run fonts has produced a manifest; without one the
+    // original links stay and the gate says so rather than shipping a 404.
+    const fonts = localizeGoogleFonts(mapped.html, fontManifest);
+
     // Two stale facts the source baked into every page: a copyright year that has
     // since passed, and menu items whose URL field was filled with a bare number.
-    const dated = updateCopyrightYear(form.html);
+    const dated = updateCopyrightYear(fonts.html);
     const linked = repairMenuLinks(dated);
     const titled = translateEnglishTitle(linked.html, page.outPath);
-    if (dated !== form.html) stats.copyrightYears += 1;
+    if (dated !== fonts.html) stats.copyrightYears += 1;
 
     // The origin's search box queried PHP; this points it at a local index instead.
     const search = enableStaticSearch(titled.html);
@@ -332,6 +345,9 @@ export async function build({ quiet = false } = {}) {
     stats.shopControls += Object.values(cleaned.removed).reduce((sum, n) => sum + n, 0);
     stats.mobileBars += bar.replaced;
     stats.formsReplaced += form.replaced;
+    stats.mapsReplaced += mapped.replaced;
+    stats.fontsLocal += fonts.replaced;
+    stats.fontsMissing += fonts.missing;
     stats.menuLinks += linked.repaired;
     stats.menuHrefsDropped += linked.dropped;
     stats.titlesFixed += titled.changed ? 1 : 0;
@@ -381,7 +397,8 @@ export async function build({ quiet = false } = {}) {
   console.log(`  lang switcher  floating button moved to ${floaterPosition}`);
   console.log(`  enquiry        ${stats.inquireLinks} buttons -> ${whatsapp || '(left as they were)'}`);
   console.log(`  shop toolbar   ${stats.shopControls} dead control(s) removed, ${stats.cards} product cards kept`);
-  console.log(`  contact form   ${stats.formsReplaced} form(s) replaced by a WhatsApp button`);
+  console.log(`  contact form   ${stats.formsReplaced} form(s) replaced by a WhatsApp button, ${stats.mapsReplaced} map(s) by the address`);
+  console.log(`  fonts          ${stats.fontsLocal} link(s) local, ${stats.fontsMissing} not in the manifest${Object.keys(fontManifest).length ? '' : ' (npm run fonts has not been run)'}`);
   console.log(`  mobile bar     ${stats.mobileBars} bar(s) rebuilt from the owner's entries`);
   console.log(`  stale bits     ${stats.copyrightYears} page(s) re-dated, ${stats.menuLinks} menu link(s) routed, ${stats.menuHrefsDropped} heading(s) unlinked, ${stats.titlesFixed} English title(s) fixed`);
   console.log(`  search         ${index.length} entries (${index.filter((e) => e.lang === 'en').length} en), ${stats.searchWired} pages wired`);
@@ -513,6 +530,11 @@ function copyPublicExtras() {
     mkdirSync(dirname(to), { recursive: true });
     copyFileSync(from, to);
   }
+
+  // The fetched fonts are a tree of unknown names, so they are copied by walking
+  // rather than by a list that would have to be edited after every npm run fonts.
+  const fontDir = join(paths.public, 'fonts');
+  if (exists(fontDir)) copyTree(fontDir, join(paths.dist, 'fonts'));
 }
 
 async function pool(items, worker, limit = 12) {

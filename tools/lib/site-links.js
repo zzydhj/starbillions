@@ -266,6 +266,115 @@ export function replaceContactForm(html, { whatsappUrl, label }) {
 }
 
 /**
+ * Replace the embedded Google map with the address as text.
+ *
+ * The iframe is an Elementor `google_maps` widget, and it reaches the homepage as
+ * well as the contact page through the shared template, so this is one edit applied
+ * everywhere rather than a per-page choice.
+ *
+ * The address is not written here. It is already in the iframe's own title and
+ * aria-label, translated per language by TranslatePress - which is the only reason
+ * an English page gets an English address. Taking it from the markup keeps one
+ * source of truth; a table in this file would be a second one, free to drift.
+ *
+ * The "在 Google 地图中打开" overlay goes with the widget. That is the whole point:
+ * a link to a service that does not answer in the visitor's country is the same
+ * defect in a smaller size.
+ */
+export function replaceMapWithAddress(html) {
+  const marker = 'elementor-widget-google_maps';
+  let output = html;
+  let replaced = 0;
+
+  let cursor = 0;
+  for (;;) {
+    const found = output.indexOf(marker, cursor);
+    if (found === -1) break;
+
+    const start = enclosingTag(output, found, 'div');
+    if (start === -1) {
+      cursor = found + marker.length;
+      continue;
+    }
+
+    const widget = output.slice(start, matchingClose(output, start, 'div'));
+    const iframe = /<iframe[^>]*maps\.google[^>]*>/i.exec(widget)?.[0];
+    const address = iframe && (/\btitle="([^"]*)"/i.exec(iframe)?.[1] ?? /aria-label="([^"]*)"/i.exec(iframe)?.[1]);
+
+    if (!iframe || !address) {
+      // A map widget we cannot read an address from is left alone rather than
+      // emptied: losing the address would be worse than keeping a broken map.
+      cursor = found + marker.length;
+      continue;
+    }
+
+    const block = [
+      '<div class="elementor-element elementor-widget elementor-widget-text-editor" data-element_type="widget" data-widget_type="text-editor.default">',
+      '  <div class="elementor-widget-container">',
+      `    <p>${address}</p>`,
+      '  </div>',
+      '</div>',
+    ].join('\n');
+
+    const end = matchingClose(output, start, 'div');
+    output = output.slice(0, start) + block + output.slice(end);
+    replaced += 1;
+    cursor = start + block.length;
+  }
+
+  return { html: output, replaced };
+}
+
+/**
+ * The form of a Google Fonts URL that identifies the stylesheet.
+ *
+ * WordPress appends `&#038;ver=7.3.3` - an entity-escaped ampersand plus a cache
+ * buster - and Google answers the same CSS regardless. Both the fetcher's manifest
+ * keys and the rewriter's lookups go through here, because two independent ideas of
+ * "the same URL" is how a manifest silently never matches and the page keeps calling
+ * Google with no error anywhere to show it.
+ */
+export function normalizeFontUrl(raw) {
+  return String(raw).split(/&#0*38;|&amp;/)[0].replace(/[?&]ver=[^&"]*/, '').replace(/[?&]$/, '');
+}
+
+/**
+ * Point the Google Fonts stylesheets at the local copies, when they exist.
+ *
+ * The rewrite is driven by the manifest `npm run fonts` writes, so this file never
+ * has to know which families the site asks for, and a build without the manifest
+ * simply keeps the original links instead of inventing 404s. That asymmetry is the
+ * safety: the fetcher is the only thing that can make a local path appear here.
+ */
+export function localizeGoogleFonts(html, manifest) {
+  if (!manifest || Object.keys(manifest).length === 0) return { html, replaced: 0, missing: 0 };
+
+  let replaced = 0;
+  let missing = 0;
+
+  const output = html.replace(/<link[^>]*href="(https:\/\/fonts\.googleapis\.com[^"]*)"[^>]*>/gi, (tag, raw) => {
+    const local = manifest[normalizeFontUrl(raw)];
+    if (!local) {
+      missing += 1;
+      return tag;
+    }
+
+    replaced += 1;
+    // The original tag also carries preconnect hints and a ver parameter; neither
+    // means anything for a same-origin file, and leaving a stale integrity-free
+    // crossorigin attribute on a local stylesheet is how a CSP later bites.
+    return tag.replace(/href="[^"]*"/, `href="${local}"`);
+  });
+
+  // The gstatic preconnect is only useful while gstatic is still being contacted.
+  const withoutHints = replaced > 0
+    ? output.replace(/\s*<link[^>]*(?:preconnect|dns-prefetch)[^>]*fonts\.(?:gstatic|googleapis)\.com[^>]*>/gi, '')
+    : output;
+
+  return { html: withoutHints, replaced, missing };
+}
+
+/**
  * Hand the search box over to the static implementation.
  *
  * Two things happen here and both are needed. The theme's own autocomplete is keyed off

@@ -447,6 +447,51 @@ check(
   `${liveForms.length} page(s) still carry the form, ${formButtons.length} carry the WhatsApp button`,
 );
 
+/* 7f. the map is text now, and the fonts state is stated, not assumed ------ */
+
+const embeds = documents.filter((doc) => /<iframe[^>]*maps\.google/i.test(doc.text));
+check(
+  'no page embeds the Google map',
+  embeds.length === 0,
+  `${embeds.length} page(s) still embed it`,
+);
+
+/**
+ * The address must survive the removal. It is looked for as text rather than as a
+ * count of replacements, because the point of the edit is that a visitor can still
+ * read where the company is.
+ */
+const addressed = documents.filter((doc) => /<p>(深圳市宝安区|Hengfeng Industrial City)/.test(doc.text));
+check(
+  'the address is printed where the map used to be',
+  addressed.length > 0,
+  `${addressed.length} page(s) show it as text`,
+);
+
+/**
+ * Fonts are reported in the state they are actually in. A manifest that has not been
+ * produced is a normal condition - the mirror has no network step - so failing on it
+ * would make npm run verify red for something the owner has not chosen to do yet.
+ * Once the manifest exists, though, the same line becomes an absolute assertion:
+ * shipping a local font tree while still calling Google is the half-done state nobody
+ * notices.
+ */
+const fontManifest = exists(join(paths.public, 'fonts', 'manifest.json'))
+  ? JSON.parse(readFileSync(join(paths.public, 'fonts', 'manifest.json'), 'utf8'))
+  : null;
+const remoteFonts = documents.filter((doc) => doc.text.includes('fonts.googleapis.com'));
+
+if (fontManifest) {
+  const unresolved = documents.filter((doc) => /fonts\.googleapis\.com|fonts\.gstatic\.com/.test(doc.text));
+  check(
+    'the fetched fonts are actually what the pages load',
+    unresolved.length === 0,
+    `${unresolved.length} page(s) still call Google despite the manifest: ${unresolved.slice(0, 2).map((doc) => doc.rel).join(', ')}`,
+  );
+} else {
+  notes.push(`  info  fonts still load from Google on ${remoteFonts.length} page(s) - npm run fonts has not been run`);
+}
+
 /* 8. the static search replaces the origin's AJAX one ------------------------- */
 
 /**

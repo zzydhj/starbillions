@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { COPYRIGHT_YEAR, EN_PAGE_TITLES, MOBILE_TOOLBAR, replaceContactForm, repairMenuLinks, replaceMobileToolbar, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './site-links.js';
+import { COPYRIGHT_YEAR, EN_PAGE_TITLES, MOBILE_TOOLBAR, localizeGoogleFonts, normalizeFontUrl, replaceContactForm, replaceMapWithAddress, repairMenuLinks, replaceMobileToolbar, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './site-links.js';
 
 const URL = 'https://wa.me/8613714286517';
 const LABELS = ['Inquire about this product', '咨询此产品'];
@@ -230,6 +230,60 @@ test('replaceContactForm swaps the metform widget for the site\'s own button', (
   assert.equal(replaceContactForm(out, { whatsappUrl: URL, label: 'x' }).replaced, 0, 'running it again changes nothing');
   const untouched = replaceContactForm(html, { whatsappUrl: '', label: 'x' });
   assert.equal(untouched.html, html, 'no number configured means no edit at all');
+});
+
+test('replaceMapWithAddress keeps the address the iframe already carries', () => {
+  const widget = '<div class="elementor-element elementor-widget elementor-widget-google_maps" data-widget_type="google_maps.default">' +
+    '<div class="elementor-widget-container"><div class="elementor-custom-embed">' +
+    '<iframe loading="lazy" src="https://maps.google.com/maps?q=x&#038;output=embed" ' +
+    'title="深圳市宝安区洲石路739号恒丰工业城" aria-label="深圳市宝安区洲石路739号恒丰工业城"></iframe>' +
+    '</div></div></div>';
+
+  const { html: out, replaced } = replaceMapWithAddress(`<section>${widget}<p>电话</p></section>`);
+
+  assert.equal(replaced, 1);
+  assert.ok(!out.includes('maps.google.com'), 'the embed is gone');
+  assert.ok(!out.includes('elementor-custom-embed'), 'and its overlay link with it');
+  assert.match(out, /<p>深圳市宝安区洲石路739号恒丰工业城<\/p>/, 'the address comes from the markup, not from a table');
+  assert.match(out, /elementor-widget-text-editor/, 'in the theme\'s own text widget, so it is styled');
+  assert.match(out, /<p>电话<\/p>/, 'the rest of the section survives');
+});
+
+test('replaceMapWithAddress refuses to empty a map it cannot read an address from', () => {
+  const widget = '<div class="elementor-element elementor-widget elementor-widget-google_maps"><div class="elementor-widget-container">' +
+    '<div class="elementor-custom-embed"><img src="static-map.png"></div></div></div>';
+
+  const { html: out, replaced } = replaceMapWithAddress(widget);
+
+  assert.equal(replaced, 0, 'no iframe with an address means no edit');
+  assert.equal(out, widget);
+});
+
+test('normalizeFontUrl is the one rule both the fetcher and the rewriter use', () => {
+  const raw = 'https://fonts.googleapis.com/css?family=Hind%3A400%2C600%7COpen+Sans%3A400&#038;ver=7.3.3';
+
+  assert.equal(normalizeFontUrl(raw), 'https://fonts.googleapis.com/css?family=Hind%3A400%2C600%7COpen+Sans%3A400');
+  assert.equal(normalizeFontUrl('https://fonts.googleapis.com/css?family=Roboto&ver=1'), 'https://fonts.googleapis.com/css?family=Roboto');
+  assert.equal(normalizeFontUrl('https://fonts.googleapis.com/css?family=Roboto'), 'https://fonts.googleapis.com/css?family=Roboto');
+});
+
+test('localizeGoogleFonts rewrites only what the manifest actually names', () => {
+  const manifest = { 'https://fonts.googleapis.com/css?family=Hind%3A400': '/fonts/ab12.css' };
+  const html = '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
+    '<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Hind%3A400&#038;ver=7.3.3">' +
+    '<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto&#038;ver=7.3.3">';
+
+  const { html: out, replaced, missing } = localizeGoogleFonts(html, manifest);
+
+  assert.equal(replaced, 1);
+  assert.equal(missing, 1, 'a family the manifest does not have is left pointing at Google, not at nothing');
+  assert.match(out, /href="\/fonts\/ab12\.css"/);
+  assert.match(out, /family=Roboto/, 'the unfetched one keeps working the old way');
+  assert.ok(!out.includes('fonts.gstatic.com'), 'the preconnect goes once a local file is used');
+
+  const untouched = localizeGoogleFonts(html, {});
+  assert.equal(untouched.html, html, 'no manifest means no rewrite at all - npm run fonts has not been run');
+  assert.equal(untouched.replaced, 0);
 });
 
 test('translateEnglishTitle replaces the page name and keeps the company suffix', () => {

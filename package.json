@@ -9,6 +9,7 @@
     },
     "scripts": {
         "mirror": "node tools/mirror.mjs",
+        "fonts": "node tools/fetch-fonts.mjs",
         "check": "node tools/check.mjs",
         "verify": "node tools/mirror.mjs && node tools/check.mjs",
         "test": "node --test tools/ingest/wp/staticize.test.mjs tools/ingest/wp/search-index.test.mjs tools/lib/site-links.test.mjs",
