@@ -195,6 +195,192 @@ function findRemovableItem(html) {
   return -1;
 }
 
+/**
+ * Elementor widgets that only work while admin-ajax.php answers, cut whole.
+ *
+ * `wd_product_filters` renders a swatch filter form (产品 / 尺寸 / 1.54″ TFT ...) whose
+ * results come from an AJAX query, and every option links to `/?filter_size=...` - a
+ * query URL the mirror rules out of the static site, so the stripped form would ship as
+ * labels with nothing behind them. The widget goes, and so does the section that held it
+ * when that leaves the section empty, because an Elementor section keeps its own padding
+ * and would otherwise show as a blank band where the block was.
+ */
+export const DEAD_AJAX_WIDGETS = ['wd_product_filters'];
+
+/**
+ * Widgets whose *control* needs admin-ajax.php while their content does not.
+ *
+ * `wd_products_tabs` server-renders the first tab's product grid and fetches the other
+ * three panes on click. Deleting the whole widget was my first instinct and the browser
+ * proved it wrong: the front page's body carries no other product grid - the 56
+ * `wd_products` widgets are inside the header's category dropdown, `visibility: hidden`
+ * until hover - so cutting the widget left the home page with zero visible products on a
+ * display-only brief. So the spinner and the tab row, which are the part that could only
+ * ever spin, are cut, and the heading and the rendered grid stay.
+ */
+export const DEAD_TAB_WIDGETS = ['wd_products_tabs'];
+
+/** The control parts of a tabs widget, by whole class token. */
+const TAB_CONTROL_CLASSES = ['wd-tabs-loader', 'wd-nav-wrapper'];
+
+/** What makes a section worth keeping: a nested widget or column, or visible content. */
+const SECTION_CONTENT = /elementor-widget|elementor-column|<(?:img|p|h[1-6]|a|ul|ol|table|video|iframe|svg|button)\b/i;
+
+export function removeDeadAjaxWidgets(html, widgets = DEAD_AJAX_WIDGETS) {
+  let output = html;
+  const removed = [];
+
+  for (const widget of widgets) {
+    let count = 0;
+
+    for (;;) {
+      const at = output.indexOf(`elementor-widget-${widget}`);
+      if (at === -1) break;
+
+      const start = enclosingTag(output, at, 'div');
+      if (start === -1) break;
+
+      const section = enclosingSection(output, start);
+      const cutEnd = matchingClose(output, start, 'div');
+
+      /**
+       * A cut that does not shorten the page is a rule that cannot see its own input,
+       * and looping on "find the marker, fail to remove it" is how a build hangs on one
+       * unexpected page instead of shipping it. Counting only what was really removed
+       * keeps the report honest as well: a zero-length cut is not a removal.
+       */
+      const shortened = output.slice(0, start) + output.slice(cutEnd);
+      if (shortened.length >= output.length) break;
+
+      output = shortened;
+      count += 1;
+
+      // The section holding the widget is a flex container with its own padding, so
+      // cutting only the widget would leave a blank band exactly where the block was -
+      // a new defect wearing the old layout. It goes when nothing is left inside it.
+      if (section !== -1) {
+        const sectionEnd = matchingClose(output, section, 'div');
+        if (!SECTION_CONTENT.test(output.slice(section, sectionEnd))) {
+          output = output.slice(0, section) + output.slice(sectionEnd);
+        }
+      }
+    }
+
+    if (count > 0) removed.push({ widget, count });
+  }
+
+  return { html: output, removed, count: removed.reduce((total, entry) => total + entry.count, 0) };
+}
+
+/**
+ * Whether `name` is one of a tag's classes.
+ *
+ * Tested against the token list, not with `\be-con\b` against the attribute: a hyphen is
+ * a word boundary to a regex, so `\be-con\b` also matches `e-con-inner` - and mistaking
+ * the inner wrapper for the section cut the wrong element out of the page, leaving the
+ * section's own div standing empty with its padding intact. Exactly the blank band this
+ * code exists to prevent.
+ */
+function hasClass(classes, name) {
+  return classes.split(/\s+/).includes(name);
+}
+
+/**
+ * Cut the spinner and the tab row out of every AJAX-only tabs widget, keep the pane.
+ *
+ * The loop is bounded by "did this pass change anything": the widget's own class stays
+ * in the page (it is what the surviving grid is styled from), so a marker search alone
+ * would find the same widget forever.
+ */
+export function removeDeadTabsNavigation(html, widgets = DEAD_TAB_WIDGETS) {
+  let output = html;
+  let removed = 0;
+
+  for (const widget of widgets) {
+    for (;;) {
+      const at = output.indexOf(`elementor-widget-${widget}`);
+      if (at === -1) break;
+
+      const start = enclosingTag(output, at, 'div');
+      if (start === -1) break;
+
+      const end = matchingClose(output, start, 'div');
+      if (end <= start) break;
+
+      const region = output.slice(start, end);
+      const stripped = cutClassBlocks(region, TAB_CONTROL_CLASSES);
+      if (stripped.blocks === 0) break;
+
+      output = output.slice(0, start) + stripped.html + output.slice(end);
+      removed += stripped.blocks;
+    }
+  }
+
+  return { html: output, removed };
+}
+
+/** Remove every <div> in `html` that carries one of `names` as a whole class token. */
+function cutClassBlocks(html, names) {
+  let output = html;
+  let blocks = 0;
+
+  for (;;) {
+    const at = findClassBlock(output, names);
+    if (at === -1) break;
+
+    const end = matchingClose(output, at, 'div');
+    if (end <= at) break;
+
+    output = output.slice(0, at) + output.slice(end);
+    blocks += 1;
+  }
+
+  return { html: output, blocks };
+}
+
+/**
+ * Index of the next <div> carrying one of `names` as a class, or -1.
+ *
+ * Whole tokens, not `\bname\b` against the attribute: a hyphen is a word boundary to a
+ * regex, so `\bwd-nav\b` would also match `wd-nav-wrapper` and cut the wrong element.
+ */
+function findClassBlock(html, names) {
+  for (const match of html.matchAll(/<div\b[^>]*class="([^"]*)"[^>]*>/g)) {
+    if (match[1].split(/\s+/).some((token) => names.includes(token))) return match.index;
+  }
+
+  return -1;
+}
+
+/**
+ * The Elementor section (`e-con`) that contains `at`, or -1.
+ *
+ * Found by walking the preceding <div> tags rather than by searching backwards for the
+ * class, because a page nests dozens of divs and only the one carrying `e-con` is the
+ * section whose padding would show.
+ */
+function enclosingSection(html, at) {
+  for (let index = at; index >= 0; ) {
+    const open = html.lastIndexOf('<div', index);
+    if (open === -1) return -1;
+
+    // lastIndexOf treats a negative fromIndex as 0, so the loop counts down through
+    // real positions instead: otherwise a widget that starts the document re-finds the
+    // same <div> forever.
+    if (hasClass(classesOf(html, open), 'e-con')) return open;
+    index = open - 1;
+  }
+
+  return -1;
+}
+
+/** The class attribute of the tag starting at `open`, or the empty string. */
+function classesOf(html, open) {
+  const tagEnd = html.indexOf('>', open);
+  if (tagEnd === -1) return '';
+  return /class="([^"]*)"/.exec(html.slice(open, tagEnd))?.[1] ?? '';
+}
+
 export function isExcluded(url) {
   const pathname = decodeURIComponent(url.pathname);
   if (EXCLUDED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return true;

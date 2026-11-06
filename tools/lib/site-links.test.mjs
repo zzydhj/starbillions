@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { COPYRIGHT_YEAR, EN_PAGE_TITLES, MOBILE_TOOLBAR, googleFontStylesheetUrls, localizeGoogleFonts, normalizeFontUrl, replaceContactForm, replaceMapWithAddress, repairMenuLinks, replaceMobileToolbar, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './site-links.js';
+import { COPYRIGHT_YEAR, EN_PAGE_TITLES, MOBILE_TOOLBAR, googleFontStylesheetUrls, localizeGoogleFonts, normalizeFontUrl, replaceContactForm, replaceMapWithAddress, repairMenuLinks, repairPhoneLinks, replaceMobileToolbar, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './site-links.js';
 
 const URL = 'https://wa.me/8613714286517';
 const LABELS = ['Inquire about this product', '咨询此产品'];
@@ -331,4 +331,20 @@ test('translateEnglishTitle replaces the page name and keeps the company suffix'
   assert.equal(translateEnglishTitle(already, 'en/联系我们/index.html').changed, false, 'someone fixing it upstream stops the edit');
 
   assert.ok(Object.keys(EN_PAGE_TITLES).every((path) => path.startsWith('en/')), 'the table only names English pages');
+});
+
+test('repairPhoneLinks dials the company from the invisible link too, in both encodings', () => {
+  // The contact line shows the real number while the wd-fill link stretched over it
+  // carries the theme demo's, in plain and in %-escaped spelling.
+  const html = '<span class="list-content">Phone: (86) 13714286517</span>' +
+    '<a href="tel: (064) 332-1233" class="wd-fill" aria-label="List item link"></a>' +
+    '<a href="tel:%20(064)%20332-1233" class="wd-fill"></a>' +
+    '<a href="tel:+8613714286517">call</a>';
+
+  const { html: out, repaired } = repairPhoneLinks(html);
+
+  assert.equal(repaired, 2, 'both spellings of the placeholder, and not the correct link');
+  assert.ok(!out.includes('064'), 'the New Zealand number is gone');
+  assert.equal((out.match(/href="tel:\+8613714286517"/g) || []).length, 3, 'and all three now dial the same place');
+  assert.ok(out.includes('Phone: (86) 13714286517'), 'the visible text is left as written');
 });

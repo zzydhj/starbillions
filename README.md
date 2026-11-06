@@ -72,6 +72,8 @@ work/                       临时物：解包的 1 GB docroot、解压后的 SQ
 - 每个已拷脚本按名字要的分块都真的在产物里（`ChunkLoadError` 的唯一可行前置检查，因为它只在浏览器控制台里出现）
 - 删掉的演示内容：无文件、无链接、无空菜单项，且留下的主菜单仍是四项
 - 字体自托管后的三层一致性：页面不再叫 Google、保存下来的 CSS 所点名的 woff2 **必须在产物里**、CSS 内部不再含 `gstatic`（没跑 `npm run fonts` 时这三条降级为一条 info，不算失败）
+- 只能 AJAX 的组件：整块删的删到了、只删控件的挖不出东西了，且**每页产品卡片数与缓存页相等**（删控件不许带走内容）
+- `tel:` 链接全站只能有一个号码，且必须等于 `ENQUIRY_PHONE`
 - 双语结构齐备（根文档、`/en/`、sitemap、`_headers`、`404.html`）
 
 `404.html` 用首页自己的 header/footer 拼装（原站从未缓存 404 页），因此它不是复刻、是补作 —— 站点名从首页 `<title>` 后缀取，不硬编码。
@@ -98,9 +100,9 @@ Pages 项目的设置（Create project → Git → 选 `zzydhj/starbillions`）�
 
 `_headers`、`_redirects`、`sitemap.xml`、`404.html` 都在 `dist/` 里，Pages 会直接生效；深层页面的 `…/index.html` 会自动去后缀，所以链接写 `/product/xxx/` 形式即可。
 
-## 与原站不同的十处（均为有意）
+## 与原站不同的十二处（均为有意）
 
-复刻之外，站主明确要求过、或原站自身写错而必须偏离的共十处。它们全部集中在 `tools/lib/site-links.js` 与 `tools/ingest/wp/staticize.js`（偏好只写一份，构建器与门禁读同一处）：
+复刻之外，站主明确要求过、或原站自身写错而必须偏离的共十二处。它们全部集中在 `tools/lib/site-links.js` 与 `tools/ingest/wp/staticize.js`（偏好只写一份，构建器与门禁读同一处）：
 
 - **语言浮层**：原位置 `trp-bottom-right` 在手机上正好盖住底部菜单项，改为 `trp-top-right`。做法是换 TranslatePress 自己的位置类，不是写 CSS 覆盖 —— 插件的 `.trp-top-right` 规则在源码顺序上晚于 `:hover` 规则，同特异度下后来者赢，不需要 `!important`。
 - **询盘按钮**：产品页那 68 个（中英各 34）原本指向 `starbillions.cn` 的联系页（第三个域名），改为 `https://wa.me/8613714286517`。只按按钮可见文案匹配，所以改文案就会安全地不再命中；其余“联系我们”类链接一律未动。
@@ -154,3 +156,11 @@ Pages 项目的设置（Create project → Git → 选 `zzydhj/starbillions`）�
 两个细节都是实测踩出来的坑：（a）这些 `<link>` 在本站标记里用的是**单引号**（`href='https://…'`），而第一版规则要求 `href="…"`，于是一句也没命中，构建却报“0 local, 0 missing”——这看上去像“没东西可做”，而不是“规则看不见自己的输入”；现在取 URL 本身去匹配，不取属性形式。（b）`normalizeFontUrl` 只剔掉 `ver=` 缓存串；早期版本在第一个 `&#038;` 处截断，会连带丢掉 `display=swap`，保存下来的 CSS 就不是站点要的那份。抓取器与重写器共用同一个 finder（`googleFontStylesheetUrls`）和同一个归一化函数，不然清单键对不上就是静默不生效。
 
 产物实测：3 个 CSS + 68 个 woff2（共 1.8 MB），405 个页面链接已本地化，首页与产品页指向两个 Google 域的请求为 0，页面真正在用的 Hind `document.fonts.check` 为 true。注意 **Hind 本身不含 CJK 子集**（Google 也不提供），所以中文一直回落系统字体 —— 自托管不改变这一点，也不是缺陷。
+
+**11. 首页“热门产品分类”只删页签行，不删产品。** 那个组件是 Woodmart 的 `wd_products_tabs`：四个页签里只有第一个的内容是服务端渲染好的，其余三个靠点下去调 `admin-ajax.php`——静态主机上就是三个永转的圈。同一页还有一个 `wd_product_filters` 色块筛选表单，选项的 href 全是 `/?filter_size=…`（查询页根本不存在），删干净。
+
+但这个页签不能整体删，这是我删错一次后浏览器告诉我的：第一版把 widget 连着外层 section 一起取了，结果首页正文**一个产品都不剩**——首页那 56 个 `wd_products` 网格全在页头巨型菜单的下拉里（`visibility: hidden`），正文里唯一的产品网格就是这个页签的第一面板。现在的做法是两份清单分开：`DEAD_AJAX_WIDGETS`（只能 AJAX，整块删 + 空了就删 section）与 `DEAD_TAB_WIDGETS`（只能 AJAX 的是**控件**，只挖掉 spinner 与页签行，标题和已渲染网格留下）。门禁断言三件事：没有页还带着只能 AJAX 的 widget；对产物重跑 `removeDeadTabsNavigation` 必须挖不出东西；**每页产品卡片数与缓存页严格相等**（最后一条就是能发现我那个错误的一般断言）。实测：中英首页标题仍在，正文卡片各 10 张全部可见，标题到卡片只隔 10 px，无空白段。
+
+一个删得对不对的判据：“热门”排行做不了也不做——`data/wp-products.json` 里没有销量、没有评分（只一个 `order` 排序字段），任何榜单都是我编的；而页签自己带的是 `taxonomies` 分类 ID 集合，是原站自定义的分组，不是排行。
+
+**12. 所有 `tel:` 链接改拨公司自己的号码。** 产品页联系行写着 `Phone: (86) 13714286517`，但 Woodmart 盖在整行上的隐形链接是 `<a class="wd-fill" href="tel: (064) 332-1233">`——主题演示的新西兰号码。手机上点那一行就拨到了国外：**可见文字是访客能核的那一半，href 是真正行动的那一半**。全站只有三个不同的 `tel:` 值（真的一个，占位符两种写法：带空格与 `%20`），所以“按位比对、不等于本站号码就改”是安全的（先量后写，不是推论）；共修 121 处。号码取自 `ENQUIRY_PHONE` 常量，与底部栏、WhatsApp 按钮同源。

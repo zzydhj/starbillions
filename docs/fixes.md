@@ -71,13 +71,16 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 | 功能 | 机制 | 现状 |
 | --- | --- | --- |
 | 产品搜索 | `admin-ajax.php?action=woodmart_ajax_search` | **已重建为纯静态**：`dist/search.json` + `public/site-search.js`，本地匹配，实测可用（见 README） |
-| 首页“热门产品分类”4 个页签 | `admin-ajax.php?action=woodmart_get_products_tab_shortcode` | **仍坏**：HTML 里只预渲染了当前页签（实测 `wd-tab-content-wrapper=1`、面板=1，而页签有 4 个），点其余 3 个只看到转圈后空白 |
+| ~~首页“热门产品分类”4 个页签~~ | `admin-ajax.php?action=woodmart_get_products_tab_shortcode` | **已于 2026-11-06 修好**（`removeDeadTabsNavigation`）：页签行与 spinner 删掉，**已渲染好的第一个面板（10 张产品卡）与标题保留**。不能整块删，原因见八 |
+| ~~首页色块筛选表单~~ | `wd_product_filters` + `/?filter_size=` | **已于 2026-11-06 删干净**（`removeDeadAjaxWidgets`）：选项 href 指向查询页，而静态站不存查询页 |
 | 分类页价格筛选 | `?min_price=&max_price=` + AJAX | **仍坏**：9 处控件，筛选结果需要服务端查询 |
 | 加载更多 / 产品轮播分页 | `woodmart_get_products_*` | **仍坏** |
 | ~~联系表单（metform）~~ | `POST /wp-json/metform/v1/entries/insert/16312` | **已修（2026-11-06）**：表单删除，每页统一换成跳 WhatsApp 的按钮（当前 137 页，删演示内容前是 217 页，见下）|
 | 加入购物车 / 收藏 / 对比 | `?wc-ajax=`、`admin-ajax.php` | 按站主决定主动去除（仅界面，无后端） |
 
-页签与筛选若要修，做法与搜索同理：构建时把各页签/各筛选组合的产品列表预先渲染进去，再把主题 JS 改成本地切换。
+页签与筛选若要“真的可用”（而不只是不坏），做法与搜索同理：构建时把各页签/各筛选组合的产品列表预先渲染进去，再把主题 JS 改成本地切换。分类页的价格筛选仍是这个状态（9 处控件）。
+
+**注**：做排行榜榜单不在选项里——`data/wp-products.json` 只有 `order` 一个排序字段，没销量也没评分，任何“热销榜”都是编的。
 
 ~~联系表单~~ —— **已于 2026-11-06 移除**（`replaceContactForm`）。原表单 POST 到 `/wp-json/metform/v1/entries/insert/16312`，静态主机无法应答：访客填完、点发送，**既没提示成功也没报错**。现在统一换成一个跳 WhatsApp 的按钮：有页就有一个按钮（构建报告当前计 137 处，删演示内容前是 217 处）。其中绝大多数页是 Elementor widget（`elementor-widget-metform`，来自共享模板），另有几页是 metform 自己的页面（插件直接输出 `mf-form-wrapper`，无 widget 包裹）——只切外层会漏掉这几页。按钮复用站点自己的 `elementor-button elementor-button-link elementor-size-sm` 结构，所以外观由主题拥有。metform 脚本故意保留加载：没容器就不渲染任何东西，删标签会弄动构建器与缓存比对的引用计数，却没有任何可见收益。
 
@@ -126,9 +129,9 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 
 ---
 
-## 六、只在浏览器控制台里暴露的两处（2026-11-06 已修）
+## 六、只在浏览器控制台里暴露的三处（前两处 2026-11-06 已修，第三处仍在）
 
-这两处的共同点：**构建产物看起来完整、所有页面断言都绿**，但浏览器一打开就有错。它们都是“资源发现少走一跳”造成的，所以修的是发现器，不是个例文件。
+前两处的共同点：**构建产物看起来完整、所有页面断言都绿**，但浏览器一打开就有错。它们都是“资源发现少走一跳”造成的，所以修的是发现器，不是个例文件。第三处不同：它不是资源缺失，是一个在静态主机上永远不该发的请求。
 
 ### 1. Elementor 的 webpack 分块从未被拷过
 
@@ -140,8 +143,41 @@ Elementor 每个 post 生一份 CSS，而 WordPress 写入时用的是**当时�
 
 上面那行“该文件在备份里不存在”的旧结论，错因与本文第五节的路径坑同一个：`uploads/2023/11/10001.png` 与 `uploads/2023-11-10001.png` 在屏幕上看起来一模一样，而探测脚本按后者拼路径去 `existsSync`，当然找不到。这次是先拿 `split('/')` 看了分段，才发现四个文件一直都在。
 
+### 3. 每个英文页都会 POST 两个不存在的 PHP 端点（**未修**）
+
+2026-11-06 浏览器实测：`/en/` 首页控制台 2 条 error，英文产品页 4 条；中文页 0 条。请求体是 TranslatePress 自己的：
+
+```
+POST /wp-content/plugins/translatepress-multilingual/includes/trp-ajax.php  -> 404
+POST /wp-admin/admin-ajax.php                                             -> 404
+```
+
+日志里还有一句 `TranslatePress trp-ajax request uses fall back to admin ajax.`——插件先试自己的端点，失败后回退到 admin-ajax，两个都是静态主机上不可能存在的东西。镜像已经包含翻译好的 HTML，所以这个调用本身是多余的；语言切换靠的是普通 `<a href>`，不依赖它。未修的原因是要先确认删哪些脚本/配置对象不会影响其他 TranslatePress 行为（浮层、hreflang），不能直接猜一个删了就算。
+
 ---
 
 ## 七、YITH 目录模式（说明，非缺陷）
 
 产品页**没有价格和"加入购物车"按钮**，这是原站启用 `yith-woocommerce-catalog-mode-premium` 的设计（纯展示目录），不是复刻遗漏。
+
+---
+
+## 八、首页只能 AJAX 的组件（2026-11-06 已处理）
+
+站主对这块的原话是“你看有必要吗？没有必要就删了也行，有必要你帮我做成合理的”。量出来的事实：
+
+| 组件 | 内容形态 | 处置 |
+| --- | --- | --- |
+| `wd_products_tabs`（首页“热门产品分类”） | 4 个页签（液晶板 / 串口屏 / 转接板&测试板 / 圆形&长条形显示屏），只有第一个的面板是服务端渲染好的 10 张卡；其余三个靠 `action=woodmart_get_products_tab_shortcode` | **只删控件**：`wd-tabs-loader` 与 `wd-nav-wrapper` 整块挖掉，标题与 10 张卡保留 |
+| `wd_product_filters`（首页色块筛选） | 选项 href 全是 `/?filter_size=…`，而查询 URL 在 `isExcluded` 里已判为非页面 | **整块删**，外层 section 若因此空了一并删（否则留一条带 padding 的空白色带） |
+
+**为什么不能整块删页签（我删错过一次）**：第一版把 widget 连着外层 section 全取了，门禁与单测全绿，浏览器实测才发现首页正文**一个产品卡都不剩**——首页那 56 个 `wd_products` 网格全部在页头巨型菜单的下拉里（`visibility: hidden`、rect 全 0），止于 hover。正文里唯一的产品网格就是这个页签的第一面板。于是拆成两份清单：`DEAD_AJAX_WIDGETS`（整块删）与 `DEAD_TAB_WIDGETS`（只删控件）。
+
+门禁为此加了一条不依赖我记忆的一般断言：**每页产品卡片数必须与缓存页严格相等**（`no page gained or lost a product card`），0 页差异。卡片数比“链接还在不在”更能发现问题——藏在隐藏下拉里的卡片链接也算“可达”，可它们在屏幕上并不存在。
+
+实测（只读浏览器）：中英首页标题仍在（`SPAN.tabs-text`，rect 132×35 / 324×35），正文卡片各 10 张、尺寸均 214.8×217.2，`.wd-nav-tabs .tab-label` = 0、`.wd-tabs-loader` = 0，标题底到卡片顶只隔 9.8–10.0 px，无 >200px 空白段；中文页 console error 0。
+
+### 隐形电话链接拨的是新西兰号码
+
+产品页联系区块写着 `Phone: (86) 13714286517`，而 Woodmart 盖在整行上的 `<a class="wd-fill" href="tel: (064) 332-1233">` 还是主题演示的新西兰号码——手机上点那一行就拨到国外。规则 `repairPhoneLinks`（按位比对，不等于 `ENQUIRY_PHONE` 就改）共修 121 处；先量过：全站只有三个不同的 `tel:` 值（真的一个 + 占位符两种写法），所以“全改”是安全的。实测产物只剩 `+8613714286517`（258 处），`(064)` 为 0。
+

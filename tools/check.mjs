@@ -14,8 +14,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, walk } from './lib/fs-utils.js';
-import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadShopControls, removeOwnerMenuItems, resolvesInOutput } from './ingest/wp/staticize.js';
-import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRE_LABELS, MOBILE_TOOLBAR, replaceMobileToolbar } from './lib/site-links.js';
+import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, DEAD_AJAX_WIDGETS, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadShopControls, removeDeadTabsNavigation, removeOwnerMenuItems, resolvesInOutput } from './ingest/wp/staticize.js';
+import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRY_PHONE, ENQUIRE_LABELS, MOBILE_TOOLBAR, replaceMobileToolbar, repairPhoneLinks } from './lib/site-links.js';
 import { discover } from './mirror.mjs';
 
 /** The origin the mirror was built for, read from its own build report. */
@@ -633,6 +633,144 @@ check(
   'every chunk a copied script asks for by name was copied',
   missingChunks.length === 0,
   `${missingChunks.length} missing: ${missingChunks.slice(0, 2).join('; ')}`,
+);
+
+/* 7i. the AJAX-only widgets are gone, and nothing else went with them ---------- */
+
+/**
+ * The front pages carry a Woodmart tabs widget whose panes two to four come from
+ * admin-ajax.php, and a swatch filter form whose results come from the same place, so
+ * the build cuts both. Three ways that edit can be wrong, all computed from the cache
+ * and the output rather than from numbers written down here:
+ *
+ *   - the widget can still be on a page, which is a rule that cannot see its input;
+ *   - the section that held it can be left standing empty, which shows as a blank band
+ *     with the old padding - a new defect wearing the layout it replaced;
+ *   - and the cut can take content with it. That is the claim worth gating: every
+ *     product and category link the cached page offered must still appear on the built
+ *     page, from somewhere else on it. It is the difference between deleting a
+ *     duplicate and deleting content, and no later reader has to trust a comment.
+ */
+const deadWidgetMarkers = DEAD_AJAX_WIDGETS.map((widget) => `elementor-widget-${widget}`);
+const widgetsLeft = documents.filter((doc) => deadWidgetMarkers.some((marker) => doc.text.includes(marker)));
+
+check(
+  'no page still carries a widget that needs admin-ajax.php',
+  widgetsLeft.length === 0,
+  `${widgetsLeft.length} page(s): ${widgetsLeft.slice(0, 2).map((doc) => doc.rel).join(', ')}`,
+);
+
+/**
+ * The tabs widget is kept for the grid it renders, so what has to be gone is its
+ * control. Re-running the builder's own pass over the shipped page is the assertion:
+ * if it still finds a spinner or a tab row to cut, the build did not cut it.
+ */
+const shellsLeft = documents.filter((doc) => removeDeadTabsNavigation(doc.text).removed > 0);
+
+check(
+  'no kept tabs widget still offers a spinner or a tab row that cannot switch',
+  shellsLeft.length === 0,
+  `${shellsLeft.length} page(s): ${shellsLeft.slice(0, 2).map((doc) => doc.rel).join(', ')}`,
+);
+
+/**
+ * Catalogue links as paths, so an absolute source URL and a root-absolute one compare.
+ *
+ * Exactly one segment after `product/` or `product-category/`, because the looser form
+ * also matched `/product/x/feed/` - and the mirror deletes those RSS endpoints on
+ * purpose, which this gate then reported as content lost. A gate that flags deliberate
+ * deletions is worse than no gate: the next reader learns to ignore the section.
+ */
+const CATALOGUE_PATH = /^\/(?:en\/)?(?:product|product-category)\/[^/]+\/?$/;
+
+function catalogueLinks(text) {
+  const found = new Set();
+
+  for (const match of text.matchAll(/href="([^"]*\/product(?:-category)?\/[^"]*)"/g)) {
+    let pathname;
+    try {
+      pathname = decodeURIComponent(new URL(match[1], ORIGIN_URLS[0]).pathname);
+    } catch {
+      continue; // Not a URL at all, so not a link that could have been lost.
+    }
+
+    if (CATALOGUE_PATH.test(pathname)) found.add(pathname.endsWith('/') ? pathname : `${pathname}/`);
+  }
+
+  return found;
+}
+
+const emptySections = (text) => (text.match(/<div class="e-con-inner">\s*<\/div>/g) || []).length;
+const builtByPath = new Map(documents.map((doc) => [`/${doc.rel.replace(/index\.html$/, '')}`, doc]));
+const lostLinks = [];
+const lostCards = [];
+let sectionsCached = 0;
+let sectionsShipped = 0;
+
+/**
+ * Card counting is the claim that would have caught my first version of this edit: I
+ * cut the whole tabs widget and the browser had to tell me the front page then showed
+ * no products at all, because its body carries no other grid - the 56 `wd_products`
+ * widgets are inside the header's hover dropdown. Comparing cards per page, source
+ * against output, says in one number whether a deletion took content or only chrome.
+ */
+const cards = (text) => (text.match(/class="product-grid-item/g) || []).length;
+
+for (const page of discover(paths.pageCache).filter((page) => !isOwnerRemoved(page.urlPath))) {
+  const doc = builtByPath.get(page.urlPath.endsWith('/') ? page.urlPath : `${page.urlPath}/`);
+  if (!doc) continue;
+
+  const source = readFileSync(page.file, 'utf8');
+  for (const link of catalogueLinks(source)) {
+    if (!catalogueLinks(doc.text).has(link)) lostLinks.push(`${page.urlPath} -> ${link}`);
+  }
+
+  if (cards(source) !== cards(doc.text)) lostCards.push(`${page.urlPath}: ${cards(source)} -> ${cards(doc.text)}`);
+
+  sectionsCached += emptySections(source);
+  sectionsShipped += emptySections(doc.text);
+}
+
+check(
+  'removing those widgets removed no product or category from any page',
+  lostLinks.length === 0,
+  `${lostLinks.length} link(s) no longer reachable: ${lostLinks.slice(0, 3).join('; ')}`,
+);
+check(
+  'no page gained or lost a product card on the way',
+  lostCards.length === 0,
+  `${lostCards.length} page(s) differ: ${lostCards.slice(0, 3).join('; ')}`,
+);
+check(
+  'no page gained an empty section from the cut',
+  sectionsShipped <= sectionsCached,
+  `${sectionsCached} empty section(s) in the cache, ${sectionsShipped} in the output`,
+);
+
+/* 7j. every phone link dials this company ------------------------------------ */
+
+/**
+ * The theme's demo number survives in the invisible link Woodmart stretches over the
+ * contact line, so the visible text said China and the href dialled New Zealand. This
+ * re-runs the builder's own repair over the output: a page where it still finds
+ * something to change is a page the build did not change. The expected value comes from
+ * the same preference the builder used, and the distinct values are printed as evidence,
+ * because "one number, 137 times" is the whole claim in one line.
+ */
+const telValues = new Map();
+const unfixedPhones = [];
+
+for (const doc of documents) {
+  if (repairPhoneLinks(doc.text).html !== doc.text) unfixedPhones.push(doc.rel);
+  for (const match of doc.text.matchAll(/href=(["'])tel:([^"']*)\1/gi)) {
+    telValues.set(match[2], (telValues.get(match[2]) || 0) + 1);
+  }
+}
+
+check(
+  'no tel: link dials a number that is not the company\'s own',
+  unfixedPhones.length === 0 && telValues.size === 1 && telValues.has(`+86${ENQUIRY_PHONE}`),
+  `${telValues.size} distinct value(s): ${[...telValues].map(([value, count]) => `${value} x${count}`).join(', ')}`,
 );
 
 /* 8. the static search replaces the origin's AJAX one ------------------------- */

@@ -21,7 +21,9 @@ import {
   localizeCssAssetUrls,
   moveLanguageFloater,
   originSet,
+  removeDeadAjaxWidgets,
   removeDeadShopControls,
+  removeDeadTabsNavigation,
   removeOwnerMenuItems,
   rebaseIdentityUrls,
   referencesIn,
@@ -441,4 +443,94 @@ test('removeOwnerMenuItems takes the dead entry with its subtree and keeps a liv
   assert.ok(!out.includes('混进来的文章'), 'a dead child under a live parent is still removed');
   assert.match(out, /产品中心/, 'the real item is untouched');
   assert.match(out, /串口屏/, 'and so are its live children');
+});
+
+/**
+ * The two front-page blocks as the cache holds them, each inside the Elementor section
+ * that wraps it. The tabs widget's nav item carries the query it would have sent to
+ * admin-ajax.php, its first pane is server-rendered, and the other panes are an empty
+ * shell behind a spinner.
+ */
+const sectionAround = (widget) =>
+  '<div class="site"><p>above</p>' +
+  '<div class="elementor-element elementor-element-aa3639c e-flex e-con-boxed e-con e-parent" data-id="aa3639c">' +
+  '<div class="e-con-inner">' + widget + '</div></div><p>below</p></div>';
+
+const tabsWidget =
+  '<div class="elementor-element elementor-widget elementor-widget-wd_products_tabs" data-id="1b2d3dd">' +
+  '<div class="elementor-widget-container"><div class="wd-tabs wd-products-tabs">' +
+  '<div class="wd-tabs-header">' +
+  '<div class="wd-tabs-loader"><span class="wd-loader"></span></div>' +
+  '<div class="tabs-name title"><span class="tabs-text">热门产品分类</span></div>' +
+  '<div class="wd-nav-wrapper wd-nav-tabs-wrapper tabs-navigation-wrapper"><ul class="wd-nav wd-nav-tabs">' +
+  '<li data-atts="{&quot;taxonomies&quot;:[&quot;462&quot;,&quot;456&quot;]}"><a href="#" class="wd-nav-link"><span class="tab-label">液晶板</span></a></li>' +
+  '<li data-atts="{&quot;taxonomies&quot;:[&quot;525&quot;]}"><a href="#" class="wd-nav-link"><span class="tab-label">串口屏</span></a></li>' +
+  '</ul></div></div>' +
+  '<div class="wd-tab-content-wrapper"><div class="wd-products-element"><ul class="products elements-grid row">' +
+  '<li class="product"><div class="product-grid-item"><a href="/product/a/">A</a></div></li>' +
+  '</ul></div></div>' +
+  '</div></div></div>';
+
+const filterWidget =
+  '<div class="elementor-element elementor-widget elementor-widget-wd_product_filters" data-id="037853e">' +
+  '<div class="elementor-widget-container"><form class="wd-product-filters">' +
+  '<span class="wd-filter-lable">产品</span><ul class="wd-swatches-filter"><li><a href="/?filter_size=1-54">1.54″ TFT</a></li></ul>' +
+  '</form></div></div>';
+
+test('removeDeadTabsNavigation cuts the spinner and the tab row, keeps the rendered grid', () => {
+  const { html: out, removed } = removeDeadTabsNavigation(sectionAround(tabsWidget));
+
+  assert.equal(removed, 2, 'the loader and the nav wrapper');
+  assert.ok(!out.includes('wd-tabs-loader'), 'no spinner waiting for a reply that cannot come');
+  assert.ok(!out.includes('wd-nav-wrapper'), 'no row of labels that cannot switch anything');
+  assert.ok(!out.includes('data-atts'), 'and none of the query JSON that went with them');
+  assert.ok(out.includes('热门产品分类'), 'the heading stays - it names what is below it');
+  assert.ok(out.includes('product-grid-item'), 'and so do the products that were already rendered');
+  assert.ok(out.includes('wd_products_tabs'), 'the widget element stays: its classes style that grid');
+  assert.ok(out.includes('e-con e-parent'), 'and so does its section, which still has content');
+});
+
+test('removeDeadTabsNavigation stops after one pass, so a kept widget cannot spin the build', () => {
+  const once = removeDeadTabsNavigation(sectionAround(tabsWidget));
+  const twice = removeDeadTabsNavigation(once.html);
+
+  assert.equal(twice.removed, 0, 'nothing left to cut, even though the marker is still there');
+  assert.equal(twice.html, once.html);
+});
+
+test('removeDeadAjaxWidgets leaves the tabs widget alone, because cutting it deletes the page', () => {
+  const page = sectionAround(tabsWidget);
+  const { html: out, count } = removeDeadAjaxWidgets(page);
+
+  assert.equal(count, 0);
+  assert.equal(out, page, 'the two lists are separate on purpose: this widget holds the only products in the body');
+});
+
+test('removeDeadAjaxWidgets cuts the swatch filter form and the section left empty behind it', () => {
+  const { html: out, count } = removeDeadAjaxWidgets(sectionAround(filterWidget));
+
+  assert.equal(count, 1);
+  assert.ok(!out.includes('wd-product-filters'), 'the form is gone');
+  assert.ok(!out.includes('filter_size'), 'with links that only ever asked for an AJAX result');
+  assert.ok(!out.includes('e-con e-parent'), 'and no blank band keeps its padding');
+  assert.match(out, /<p>above<\/p><p>below<\/p>/, 'the page closes up behind it');
+});
+
+test('removeDeadAjaxWidgets keeps a section that still holds something else', () => {
+  const sibling = '<div class="elementor-element elementor-widget elementor-widget-image"><img src="/wp-content/uploads/s.png" alt=""></div>';
+  const { html: out, count } = removeDeadAjaxWidgets(sectionAround(sibling + filterWidget));
+
+  assert.equal(count, 1);
+  assert.ok(out.includes('e-con e-parent'), 'the section stays because the image is still in it');
+  assert.ok(out.includes('/wp-content/uploads/s.png'), 'and its neighbour is untouched');
+  assert.ok(!out.includes('wd-product-filters'));
+});
+
+test('both passes are a no-op on a page that carries neither control', () => {
+  const plain = '<div class="e-con e-parent"><div class="e-con-inner"><p>just text</p></div></div>';
+
+  assert.equal(removeDeadAjaxWidgets(plain).html, plain);
+  assert.equal(removeDeadAjaxWidgets(plain).count, 0);
+  assert.equal(removeDeadTabsNavigation(plain).html, plain);
+  assert.equal(removeDeadTabsNavigation(plain).removed, 0);
 });

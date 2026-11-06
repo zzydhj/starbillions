@@ -25,6 +25,34 @@ export const ENQUIRY_PHONE = '13714286517';
 export const ENQUIRE_LABELS = ['Inquire about this product', '咨询此产品'];
 
 /**
+ * Point every `tel:` link at the company's own number.
+ *
+ * The contact block under each product *says* "Phone: (86) 13714286517", while the
+ * invisible link Woodmart stretches over the whole list item - `<a class="wd-fill"
+ * href="tel: (064) 332-1233">` - still carries the theme demo's New Zealand number. On
+ * a phone, tapping that line dials a number that never belonged to this company: the
+ * text is the half a visitor can check, the href is the half that acts.
+ *
+ * Measured before the rule was written, because "rewrite all tel: links" is only safe
+ * if the site has one number: three distinct values ship across 137 pages - the real
+ * one, and the same placeholder twice (plain and %-encoded). Comparison is on digits,
+ * so the existing correct links come back untouched whatever punctuation they use.
+ */
+export function repairPhoneLinks(html, phone = `tel:+86${ENQUIRY_PHONE}`) {
+  const digits = phone.replace(/\D/g, '');
+  let repaired = 0;
+
+  const output = html.replace(/href=(["'])tel:([^"']*)\1/gi, (tag, quote, value) => {
+    if (value.replace(/\D/g, '') === digits) return tag;
+
+    repaired += 1;
+    return `href=${quote}${phone}${quote}`;
+  });
+
+  return { html: output, repaired };
+}
+
+/**
  * The year the footer should claim.
  *
  * Hardcoded rather than computed at runtime, because a copyright range is a legal

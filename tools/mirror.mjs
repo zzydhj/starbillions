@@ -40,7 +40,7 @@ import { dirname, join } from 'node:path';
 import { dirname as posixDirname, join as posixJoin, resolve as posixResolve } from 'node:path/posix';
 import { paths } from './lib/paths.js';
 import { exists, removeTree, copyTree } from './lib/fs-utils.js';
-import { ENQUIRE_LABELS, ENQUIRY_PHONE, CONTACT_FORM_LABELS, MOBILE_TOOLBAR, enableStaticSearch, localizeGoogleFonts, replaceContactForm, replaceMapWithAddress, replaceMobileToolbar, repairMenuLinks, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './lib/site-links.js';
+import { ENQUIRE_LABELS, ENQUIRY_PHONE, CONTACT_FORM_LABELS, MOBILE_TOOLBAR, enableStaticSearch, localizeGoogleFonts, replaceContactForm, replaceMapWithAddress, replaceMobileToolbar, repairMenuLinks, repairPhoneLinks, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './lib/site-links.js';
 import { buildSearchIndex } from './ingest/wp/search-index.js';
 import {
   fileReferencesIn,
@@ -53,7 +53,9 @@ import {
   originSet,
   rebaseIdentityUrls,
   referencesIn,
+  removeDeadAjaxWidgets,
   removeDeadShopControls,
+  removeDeadTabsNavigation,
   removeOwnerMenuItems,
   rewriteReferences,
   rootifyOrigins,
@@ -304,7 +306,7 @@ export async function build({ quiet = false } = {}) {
   let written = 0;
   let copied = 0;
   let homeHtml = '';
-  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0, formsReplaced: 0, mapsReplaced: 0, fontsLocal: 0, fontsMissing: 0, demoMenuItems: 0 };
+  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0, formsReplaced: 0, mapsReplaced: 0, fontsLocal: 0, fontsMissing: 0, demoMenuItems: 0, deadWidgets: 0, deadTabControls: 0, phoneLinks: 0 };
   // Written by npm run fonts. An absent manifest is a normal state - the mirror has
   // no network step - so it reads as "keep the original links", not as an error.
   const fontManifestPath = join(paths.public, 'fonts', 'manifest.json');
@@ -325,7 +327,18 @@ export async function build({ quiet = false } = {}) {
     const demenued = removeOwnerMenuItems(rebased);
     stats.demoMenuItems += demenued.removed;
 
-    const out = rewriteReferences(demenued.html, {
+    // AJAX-only widgets go next: they are recognised by their Elementor class, which
+    // the URL pass neither adds nor removes, so order does not matter here - but they
+    // must go before the search index and the card count are gathered, because those
+    // describe what the shipped page actually holds.
+    const unwidged = removeDeadAjaxWidgets(demenued.html);
+    stats.deadWidgets += unwidged.count;
+
+    // The tabs widget keeps its rendered grid, so only its spinner and tab row go.
+    const detabbed = removeDeadTabsNavigation(unwidged.html);
+    stats.deadTabControls += detabbed.removed;
+
+    const out = rewriteReferences(detabbed.html, {
       pageUrl: page.pageUrl,
       origins,
       /**
@@ -399,8 +412,13 @@ export async function build({ quiet = false } = {}) {
     // since passed, and menu items whose URL field was filled with a bare number.
     const dated = updateCopyrightYear(fonts.html);
     const linked = repairMenuLinks(dated);
-    const titled = translateEnglishTitle(linked.html, page.outPath);
+
+    // And the theme's demo phone number, which sat in the invisible link over the
+    // contact line that shows the real one.
+    const phoned = repairPhoneLinks(linked.html);
+    const titled = translateEnglishTitle(phoned.html, page.outPath);
     if (dated !== fonts.html) stats.copyrightYears += 1;
+    stats.phoneLinks += phoned.repaired;
 
     // The origin's search box queried PHP; this points it at a local index instead.
     const search = enableStaticSearch(titled.html);
@@ -476,9 +494,11 @@ export async function build({ quiet = false } = {}) {
   console.log(`  shop toolbar   ${stats.shopControls} dead control(s) removed, ${stats.cards} product cards kept`);
   console.log(`  contact form   ${stats.formsReplaced} form(s) replaced by a WhatsApp button, ${stats.mapsReplaced} map(s) by the address`);
   console.log(`  demo content   ${notBuilt} page(s) not built, ${stats.demoMenuItems} menu item(s) cut with them`);
+  console.log(`  dead widgets   ${stats.deadWidgets} widget(s) that only worked through admin-ajax.php, ${stats.deadTabControls} tab control(s) cut from the ones that are kept`);
   console.log(`  fonts          ${stats.fontsLocal} link(s) local, ${stats.fontsMissing} not in the manifest${Object.keys(fontManifest).length ? '' : ' (npm run fonts has not been run)'}`);
   console.log(`  mobile bar     ${stats.mobileBars} bar(s) rebuilt from the owner's entries`);
   console.log(`  stale bits     ${stats.copyrightYears} page(s) re-dated, ${stats.menuLinks} menu link(s) routed, ${stats.menuHrefsDropped} heading(s) unlinked, ${stats.titlesFixed} English title(s) fixed`);
+  console.log(`  phone links    ${stats.phoneLinks} tel: link(s) redialled from the theme's demo number to +86${ENQUIRY_PHONE}`);
   console.log(`  search         ${index.length} entries (${index.filter((e) => e.lang === 'en').length} en), ${stats.searchWired} pages wired`);
   console.log(`  uncached links ${unknownPages.size} targets the mirror links to but never rendered`);
   console.log(`  in             ${((Date.now() - started) / 1000).toFixed(1)} s\n`);
