@@ -72,7 +72,7 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 | --- | --- | --- |
 | 产品搜索 | `admin-ajax.php?action=woodmart_ajax_search` | **已重建为纯静态**：`dist/search.json` + `public/site-search.js`，本地匹配，实测可用（见 README） |
 | ~~首页“热门产品分类”4 个页签~~ | `admin-ajax.php?action=woodmart_get_products_tab_shortcode` | **已于 2026-11-06 修好**（`removeDeadTabsNavigation`）：页签行与 spinner 删掉，**已渲染好的第一个面板（10 张产品卡）与标题保留**。不能整块删，原因见八 |
-| ~~首页色块筛选表单~~ | `wd_product_filters` + `/?filter_size=` | **已于 2026-11-06 删干净**（`removeDeadAjaxWidgets`）：选项 href 指向查询页，而静态站不存查询页 |
+| ~~首页色块筛选表单~~ | `wd_product_filters` + `/?filter_size=` | **已于 2026-11-06 删干净**（`removeDeadAjaxWidgets`）：选项 href 指向查询页，而静态站不存在查询页 |
 | ~~分类页价格筛选~~ | `?min_price=&max_price=` + AJAX | **不存在——本文此前写错了**。实测：`wd-ajax-filters-widget` / `wd_filters_full` / `wd-slider-range` 出现 **0** 次，`<input type=range>`、`name="min_price"` 也 **0** 个。所谓“9 处控件”是我数子串数出来的误判：那 9 次 `price-filter` 全部在样式表句柄与文件名里（`woo-widget-price-filter.min.css`、一段 CSS 选择器列表、`woodmart_page_css` 这个 JSON 映射），没有一个在页面上 |
 | ~~加载更多 / 产品轮播分页~~ | `woodmart_get_products_*` | **分类页上也没有**（`load-more` / `infinite` 元素 0 个）；商店页的分页是真实的三个缓存页（`/产品中心/`、`page/2/`、`page/3/`），本来就能点 |
 | 分类页的汉堡侧栏 | `offCanvasColumnBtn.min.js`（本地 jQuery） | **能用的，保留**：按钮 `.wd-off-canvas-btn` 在窄屏可见（实测 rect 103×15），面板 `wd-col-offcanvas-sm` 已在 DOM 里（默认 `transform: translateX(-300px)` + `wd-side-hidden`），脚本只做 addClass/removeClass/preventDefault，**不请求任何服务端**；面板里是 25 条真实分类与联系链接。注意：本次会话浏览器窗口隐藏，click 事件派发不下去，所以这一项的证据是“监听代码 + DOM 现状”，不是真点了一下 |
