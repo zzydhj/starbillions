@@ -50,6 +50,7 @@ import {
   originSet,
   rebaseIdentityUrls,
   referencesIn,
+  removeDeadShopControls,
   rewriteReferences,
   rootifyOrigins,
   stripLanguagePrefix,
@@ -237,7 +238,7 @@ export async function build({ quiet = false } = {}) {
   let written = 0;
   let copied = 0;
   let homeHtml = '';
-  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0 };
+  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0 };
   // Inputs for the search index, gathered while writing rather than re-read from disk:
   // the index must describe the pages that were actually shipped, not the cache files
   // they came from.
@@ -280,8 +281,25 @@ export async function build({ quiet = false } = {}) {
     // go to WhatsApp instead of a contact page on a third domain.
     const edited = rewriteInquireButtons(positioned, whatsapp, ENQUIRE_LABELS);
 
+    // The toolbar's per-page counts and column icons: no code on the site, or on the
+    // origin, can act on them, so they are cut rather than promised.
+    const cleaned = removeDeadShopControls(edited);
+
+    // The controls sit beside the loop, never inside it, so the card count cannot
+    // move. If it ever does, the tag matching has eaten products, and that is a
+    // silent content loss no later check would describe accurately.
+    //
+    // Matched without the closing quote, because a card's class list continues after
+    // this name; with the quote both counts read zero and the guard passes while
+    // measuring nothing.
+    const cardsBefore = occurrences(edited, 'class="product-grid-item');
+    const cardsAfter = occurrences(cleaned.html, 'class="product-grid-item');
+    if (cardsAfter !== cardsBefore) {
+      throw new Error(`${page.urlPath}: removing the shop toolbar changed the product card count (${cardsBefore} -> ${cardsAfter})`);
+    }
+
     // The origin's search box queried PHP; this points it at a local index instead.
-    const search = enableStaticSearch(edited);
+    const search = enableStaticSearch(cleaned.html);
 
     stats.rewritten += out.rewritten;
     stats.dropped += out.dropped;
@@ -292,6 +310,8 @@ export async function build({ quiet = false } = {}) {
     written += 1;
     stats.inquireLinks += occurrences(search.html, whatsapp) - occurrences(positioned, whatsapp);
     stats.searchWired += search.wired ? 1 : 0;
+    stats.shopControls += Object.values(cleaned.removed).reduce((sum, n) => sum + n, 0);
+    stats.cards += cardsBefore;
 
     if (/^\/product\//.test(page.urlPath) || /^\/en\/product\//.test(page.urlPath)) {
       productPages.push({ html: search.html, urlPath: page.urlPath, lang: page.urlPath.startsWith('/en/') ? 'en' : 'zh' });
@@ -336,6 +356,7 @@ export async function build({ quiet = false } = {}) {
   console.log(`  sitemap        ${sitemap.split('<url>').length - 1} urls -> ${siteOrigin}`);
   console.log(`  lang switcher  floating button moved to ${floaterPosition}`);
   console.log(`  enquiry        ${stats.inquireLinks} buttons -> ${whatsapp || '(left as they were)'}`);
+  console.log(`  shop toolbar   ${stats.shopControls} dead control(s) removed, ${stats.cards} product cards kept`);
   console.log(`  search         ${index.length} entries (${index.filter((e) => e.lang === 'en').length} en), ${stats.searchWired} pages wired`);
   console.log(`  uncached links ${unknownPages.size} targets the mirror links to but never rendered`);
   console.log(`  in             ${((Date.now() - started) / 1000).toFixed(1)} s\n`);

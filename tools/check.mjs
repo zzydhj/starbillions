@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, walk } from './lib/fs-utils.js';
-import { FLOATER_POSITIONS, ORIGIN_URLS, resolvesInOutput } from './ingest/wp/staticize.js';
+import { FLOATER_POSITIONS, ORIGIN_URLS, removeDeadShopControls, resolvesInOutput } from './ingest/wp/staticize.js';
 import { ENQUIRE_LABELS } from './lib/site-links.js';
 import { discover } from './mirror.mjs';
 
@@ -267,6 +267,49 @@ check(
   floaters.length === 0
     ? 'no floating switcher found, so this check measured nothing'
     : `${floaters.length} page(s) carry trp-${floater}, ${floatersElsewhere.length} elsewhere`,
+);
+
+/* 7b. the dead shop toolbar controls are gone -------------------------------- */
+
+/**
+ * "Show: 9 / 12 / 18 / 24" and the column-count icons have no href and no script that
+ * listens for them, here or on the origin, so they were removed.
+ *
+ * Asserted by asking the builder's own function whether anything is left to cut,
+ * rather than by searching for the class names: those strings also occur in inline
+ * CSS (268 mentions against 51 elements), so a text search could never report zero,
+ * and a narrower regex written only here would drift from what the build actually
+ * recognises as a control.
+ */
+const leftToCut = documents.reduce((total, doc) => {
+  return total + Object.values(removeDeadShopControls(doc.text).removed).reduce((sum, n) => sum + n, 0);
+}, 0);
+
+check(
+  'the dead shop toolbar controls are gone from every page',
+  leftToCut === 0,
+  `${leftToCut} control(s) still cuttable`,
+);
+
+/**
+ * The removal must not have reached the products it sits next to. Counting cards is
+ * the build's own job - mirror.mjs throws when its edit moves the number - so what
+ * belongs here is the weaker, non-brittle statement that an archive page still shows
+ * a loop and still shows something in it.
+ */
+const archives = documents.filter((doc) => /product-category|\/(shop|产品)/.test(doc.rel));
+const bareArchives = archives.filter((doc) => !doc.text.includes('class="product-grid-item'));
+
+// No closing quote: a card's class list continues (`product-grid-item product
+// product-no-swatches ...`), and matching the attribute as if it were a lone value
+// reported every archive page as empty.
+
+check(
+  'the archive pages still render their product grid',
+  archives.length > 0 && bareArchives.length === 0,
+  archives.length === 0
+    ? 'no archive page found, so this check measured nothing'
+    : `${archives.length} archive page(s), ${bareArchives.length} with no card: ${bareArchives.slice(0, 3).map((doc) => doc.rel).join(', ')}`,
 );
 
 /* 8. the static search replaces the origin's AJAX one ------------------------- */

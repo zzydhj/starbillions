@@ -18,6 +18,7 @@ import {
   isExcluded,
   moveLanguageFloater,
   originSet,
+  removeDeadShopControls,
   rebaseIdentityUrls,
   referencesIn,
   resolvesInOutput,
@@ -285,4 +286,55 @@ test('moveLanguageFloater swaps the position class the plugin itself defines', (
   assert.match(moved, /"ls_position":"bottom_right"/, 'the stored setting, which uses an underscore, is left alone');
   assert.equal(moveLanguageFloater(html, 'bottom-right'), html, 'the default position is a no-op');
   assert.throws(() => moveLanguageFloater(html, 'middle'), /unknown language switcher position/);
+});
+
+test('removeDeadShopControls cuts the whole widget and nothing around it', () => {
+  const html = [
+    '<div class="wd-toolbar">',
+    '<div class="elementor-element elementor-widget-wd_shop_archive_per_page" data-id="a">',
+    '<div class="elementor-widget-container"><div class="wd-products-per-page">',
+    '<a class="per-page-variation"><span>9</span></a><a class="per-page-variation"><span>12</span></a>',
+    '</div></div></div>',
+    '<div class="elementor-element elementor-widget-wd_shop_archive_view" data-id="b">',
+    '<div class="elementor-widget-container"><div class="wd-products-shop-view products-view-grid">',
+    '<a class="shop-view per-row-2"></a>',
+    '</div></div></div>',
+    '<div class="elementor-element elementor-widget-wd_wc_sorting"><select><option>默认排序</option></select></div>',
+    '</div>',
+    '<div class="products wd-products-holder" data-source="main_loop"><li class="product-grid-item">x</li></div>',
+  ].join('');
+
+  const { html: out, removed } = removeDeadShopControls(html);
+
+  assert.equal(removed.wd_shop_archive_per_page, 1);
+  assert.equal(removed.wd_shop_archive_view, 1);
+  assert.ok(!out.includes('per-page-variation'), 'the per-page anchors are gone');
+  assert.ok(!out.includes('per-row-2'), 'the column icons are gone');
+  assert.ok(!out.includes('wd-products-per-page'), 'no emptied shell is left behind');
+  assert.match(out, /elementor-widget-wd_wc_sorting/, 'the sorting control beside them survives');
+  assert.match(out, /product-grid-item/, 'the product loop survives');
+});
+
+test('removeDeadShopControls refuses to cut on a CSS mention of the class', () => {
+  // The names really do appear in inline style blocks: 268 mentions of
+  // wd-products-per-page against 51 elements in the built mirror. A text match would
+  // delete the markup that happens to precede the rule.
+  const html = '<div>keep me</div><style>.elementor-widget-wd_shop_archive_per_page{display:inline-flex}</style>' +
+    '<div class="elementor-element elementor-widget-wd_shop_archive_per_page"><a class="per-page-variation">9</a></div>';
+
+  const { html: out, removed } = removeDeadShopControls(html);
+
+  assert.equal(removed.wd_shop_archive_per_page, 1, 'only the element counts');
+  assert.match(out, /keep me/, 'the preceding element is untouched');
+  assert.match(out, /display:inline-flex/, 'the rule text stays where it was');
+});
+
+test('removeDeadShopControls is idempotent and quiet when the page has no toolbar', () => {
+  const page = '<main><h1>关于</h1></main>';
+  assert.equal(removeDeadShopControls(page).html, page);
+  assert.equal(removeDeadShopControls(page).removed.wd_shop_archive_view, 0);
+
+  const withTwo = '<div class="elementor-element elementor-widget-wd_shop_archive_view"><a class="shop-view per-row-3"></a></div>';
+  const once = removeDeadShopControls(withTwo).html;
+  assert.equal(removeDeadShopControls(once).html, once, 'running it twice changes nothing further');
 });

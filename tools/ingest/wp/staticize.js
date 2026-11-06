@@ -24,6 +24,7 @@
  * carries leftovers from a local preview host.
  */
 import path from 'node:path';
+import { enclosingTag, matchingClose } from '../../lib/html-tags.js';
 
 /** Origins that appear in the cached HTML and mean "this site". */
 export const ORIGIN_URLS = ['https://tftstar.com', 'http://tftstar.com'];
@@ -343,6 +344,65 @@ export function moveLanguageFloater(html, position) {
   if (position === 'bottom-right') return html;
 
   return html.replace(/\btrp-(?:top|bottom)-(?:right|left)\b/g, `trp-${position}`);
+}
+
+/**
+ * Remove the shop toolbar's "Show: 9 / 12 / 18 / 24" and the column-count icons.
+ *
+ * Both are dead interface, and were dead on the origin too. The evidence, measured
+ * rather than assumed:
+ *
+ *   <a rel="nofollow noopener" class="per-page-variation"><span>9</span></a>
+ *   <a rel="nofollow noopener" class="shop-view per-row-2" aria-label="网格视图 2"></a>
+ *
+ * Neither anchor carries an href, so there is nothing for a browser to follow, and
+ * every JavaScript file in the source backup - 322 in the theme alone, plus all of
+ * the plugins - was searched for `per-page-variation`, `shop-view` and `per-row-`:
+ * no file mentions them, so no file can be listening for the click. Only
+ * `owlCarouselInit.min.js` contains `per_page`, which is a carousel option of the
+ * same spelling and nothing to do with this control.
+ *
+ * Removing them costs no function that exists, and leaves a toolbar whose remaining
+ * parts (the sorting dropdown) still work, because they are plain links.
+ *
+ * The whole Elementor widget is cut, not just the control inside it: the wrapper
+ * carries the layout classes, and an emptied shell would still reserve its margin.
+ * Cutting by structure rather than by regex matters here - the same class names also
+ * appear in inline CSS (268 mentions against 51 elements), so a text match would
+ * delete real content on the strength of a selector. `enclosingTag` refuses any hit
+ * that is not inside an opening tag.
+ *
+ * The loop is guarded separately: no control was found inside `data-source="main_loop"`,
+ * so nothing here can reach a product card.
+ */
+export const DEAD_SHOP_WIDGETS = ['wd_shop_archive_per_page', 'wd_shop_archive_view'];
+
+export function removeDeadShopControls(html) {
+  const removed = {};
+  let output = html;
+
+  for (const widget of DEAD_SHOP_WIDGETS) {
+    const marker = `elementor-widget-${widget}`;
+    removed[widget] = 0;
+
+    let cursor = 0;
+    for (;;) {
+      const found = output.indexOf(marker, cursor);
+      if (found === -1) break;
+
+      const start = enclosingTag(output, found, 'div');
+      if (start === -1) {
+        cursor = found + marker.length;
+        continue;
+      }
+
+      output = output.slice(0, start) + output.slice(matchingClose(output, start, 'div'));
+      removed[widget]++;
+      cursor = start;
+    }
+  }
+
+  return { html: output, removed };
 }
 
 /**

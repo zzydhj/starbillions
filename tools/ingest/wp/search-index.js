@@ -21,6 +21,7 @@
 // way and searched another, and every entry whose text changed shape would silently
 // stop matching.
 import { normalise } from '../../../public/site-search.js';
+import { matchingClose } from '../../lib/html-tags.js';
 
 /**
  * Pull one product out of its own page.
@@ -240,20 +241,6 @@ function productKey(href) {
   }
 
   return decoded.endsWith('/') ? decoded : `${decoded}/`;
-}
-
-/** Index just past the tag that closes the element opened at `from`. */
-function matchingClose(html, from, tag) {
-  const pattern = new RegExp(`<${tag}\\b|</${tag}>`, 'gi');
-  let depth = 0;
-
-  for (const match of html.matchAll(pattern)) {
-    if (match.index < from) continue;
-    depth += match[0].startsWith('</') ? -1 : 1;
-    if (depth === 0) return match.index + match[0].length;
-  }
-
-  return html.length;
 }
 
 /**
