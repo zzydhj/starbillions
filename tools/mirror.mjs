@@ -40,7 +40,7 @@ import { dirname, join } from 'node:path';
 import { dirname as posixDirname, join as posixJoin, resolve as posixResolve } from 'node:path/posix';
 import { paths } from './lib/paths.js';
 import { exists, removeTree } from './lib/fs-utils.js';
-import { ENQUIRE_LABELS, ENQUIRY_PHONE, MOBILE_TOOLBAR, enableStaticSearch, replaceMobileToolbar, repairMenuLinks, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './lib/site-links.js';
+import { ENQUIRE_LABELS, ENQUIRY_PHONE, CONTACT_FORM_LABELS, MOBILE_TOOLBAR, enableStaticSearch, replaceContactForm, replaceMobileToolbar, repairMenuLinks, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './lib/site-links.js';
 import { buildSearchIndex } from './ingest/wp/search-index.js';
 import {
   fileReferencesIn,
@@ -238,7 +238,7 @@ export async function build({ quiet = false } = {}) {
   let written = 0;
   let copied = 0;
   let homeHtml = '';
-  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0 };
+  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0, formsReplaced: 0 };
   // Inputs for the search index, gathered while writing rather than re-read from disk:
   // the index must describe the pages that were actually shipped, not the cache files
   // they came from.
@@ -302,12 +302,20 @@ export async function build({ quiet = false } = {}) {
     // is not this site. Rebuilt with entries that resolve, per language.
     const bar = replaceMobileToolbar(cleaned.html, page.urlPath.startsWith('/en/') ? MOBILE_TOOLBAR.en : MOBILE_TOOLBAR.zh);
 
+    // The metform contact form posts to a REST endpoint a static host cannot answer:
+    // a filled-in form, a press, and no answer and no error. One button, same markup
+    // the product enquiry buttons use, on every page carrying the widget.
+    const form = replaceContactForm(bar.html, {
+      whatsappUrl: whatsapp,
+      label: page.urlPath.startsWith('/en/') ? CONTACT_FORM_LABELS.en : CONTACT_FORM_LABELS.zh,
+    });
+
     // Two stale facts the source baked into every page: a copyright year that has
     // since passed, and menu items whose URL field was filled with a bare number.
-    const dated = updateCopyrightYear(bar.html);
+    const dated = updateCopyrightYear(form.html);
     const linked = repairMenuLinks(dated);
     const titled = translateEnglishTitle(linked.html, page.outPath);
-    if (dated !== bar.html) stats.copyrightYears += 1;
+    if (dated !== form.html) stats.copyrightYears += 1;
 
     // The origin's search box queried PHP; this points it at a local index instead.
     const search = enableStaticSearch(titled.html);
@@ -323,6 +331,7 @@ export async function build({ quiet = false } = {}) {
     stats.searchWired += search.wired ? 1 : 0;
     stats.shopControls += Object.values(cleaned.removed).reduce((sum, n) => sum + n, 0);
     stats.mobileBars += bar.replaced;
+    stats.formsReplaced += form.replaced;
     stats.menuLinks += linked.repaired;
     stats.menuHrefsDropped += linked.dropped;
     stats.titlesFixed += titled.changed ? 1 : 0;
@@ -372,6 +381,7 @@ export async function build({ quiet = false } = {}) {
   console.log(`  lang switcher  floating button moved to ${floaterPosition}`);
   console.log(`  enquiry        ${stats.inquireLinks} buttons -> ${whatsapp || '(left as they were)'}`);
   console.log(`  shop toolbar   ${stats.shopControls} dead control(s) removed, ${stats.cards} product cards kept`);
+  console.log(`  contact form   ${stats.formsReplaced} form(s) replaced by a WhatsApp button`);
   console.log(`  mobile bar     ${stats.mobileBars} bar(s) rebuilt from the owner's entries`);
   console.log(`  stale bits     ${stats.copyrightYears} page(s) re-dated, ${stats.menuLinks} menu link(s) routed, ${stats.menuHrefsDropped} heading(s) unlinked, ${stats.titlesFixed} English title(s) fixed`);
   console.log(`  search         ${index.length} entries (${index.filter((e) => e.lang === 'en').length} en), ${stats.searchWired} pages wired`);

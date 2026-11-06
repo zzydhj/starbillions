@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { COPYRIGHT_YEAR, EN_PAGE_TITLES, MOBILE_TOOLBAR, repairMenuLinks, replaceMobileToolbar, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './site-links.js';
+import { COPYRIGHT_YEAR, EN_PAGE_TITLES, MOBILE_TOOLBAR, replaceContactForm, repairMenuLinks, replaceMobileToolbar, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './site-links.js';
 
 const URL = 'https://wa.me/8613714286517';
 const LABELS = ['Inquire about this product', '咨询此产品'];
@@ -208,6 +208,28 @@ test('repairMenuLinks never touches a real external link', () => {
 
   assert.equal(repaired + dropped, 0);
   assert.equal(out, html);
+});
+
+test('replaceContactForm swaps the metform widget for the site\'s own button', () => {
+  const widget = '<div class="elementor-element elementor-widget elementor-widget-metform" data-widget_type="metform.default">' +
+    '<div class="elementor-widget-container"><div class="mf-form-wrapper" data-action="/wp-json/metform/v1/entries/insert/16312">' +
+    '<script type="text/mf" class="mf-template">{"fields":[]}</script></div></div></div>';
+  const html = `<section>${widget}<p class="address">深圳市</p></section>`;
+
+  const { html: out, replaced } = replaceContactForm(html, { whatsappUrl: URL, label: '通过 WhatsApp 联系我们' });
+
+  assert.equal(replaced, 1);
+  assert.ok(!out.includes('metform'), 'the widget and the endpoint it could never reach are gone');
+  assert.ok(!out.includes('mf-form-wrapper'));
+  // The replacement reuses the theme's own button classes, so its appearance is the
+  // site's rather than something this file invented alongside it.
+  assert.match(out, /class="elementor-button elementor-button-link elementor-size-sm"/);
+  assert.match(out, new RegExp(`href="${URL}" target="_blank"`));
+  assert.match(out, /<p class="address">深圳市<\/p>/, 'the content beside it survives');
+
+  assert.equal(replaceContactForm(out, { whatsappUrl: URL, label: 'x' }).replaced, 0, 'running it again changes nothing');
+  const untouched = replaceContactForm(html, { whatsappUrl: '', label: 'x' });
+  assert.equal(untouched.html, html, 'no number configured means no edit at all');
 });
 
 test('translateEnglishTitle replaces the page name and keeps the company suffix', () => {

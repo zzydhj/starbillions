@@ -74,10 +74,12 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 | 首页“热门产品分类”4 个页签 | `admin-ajax.php?action=woodmart_get_products_tab_shortcode` | **仍坏**：HTML 里只预渲染了当前页签（实测 `wd-tab-content-wrapper=1`、面板=1，而页签有 4 个），点其余 3 个只看到转圈后空白 |
 | 分类页价格筛选 | `?min_price=&max_price=` + AJAX | **仍坏**：9 处控件，筛选结果需要服务端查询 |
 | 加载更多 / 产品轮播分页 | `woodmart_get_products_*` | **仍坏** |
-| 联系表单（metform） | `POST /wp-json/metform/v1/entries/insert/16312` | **仍坏，且最严重**：客户填完点提交什么都不会发生，也不报错 |
+| ~~联系表单（metform）~~ | `POST /wp-json/metform/v1/entries/insert/16312` | **已修（2026-11-06）**：表单删除，217 处统一换成跳 WhatsApp 的按钮（见下）|
 | 加入购物车 / 收藏 / 对比 | `?wc-ajax=`、`admin-ajax.php` | 按站主决定主动去除（仅界面，无后端） |
 
-页签与筛选若要修，做法与搜索同理：构建时把各页签/各筛选组合的产品列表预先渲染进去，再把主题 JS 改成本地切换。联系表单则必须引入外部服务（Formspree / Basin / Pages Function）或改为 mailto、WhatsApp。
+页签与筛选若要修，做法与搜索同理：构建时把各页签/各筛选组合的产品列表预先渲染进去，再把主题 JS 改成本地切换。
+
+~~联系表单~~ —— **已于 2026-11-06 移除**（`replaceContactForm`）。原表单 POST 到 `/wp-json/metform/v1/entries/insert/16312`，静态主机无法应答：访客填完、点发送，**既没提示成功也没报错**。现在统一换成一个跳 WhatsApp 的按钮，共 217 处：211 页是 Elementor widget（`elementor-widget-metform`，来自共享模板），另外 6 页是 metform 自己的页面（插件直接输出 `mf-form-wrapper`，无 widget 包裹）——只切外层会漏掉这 6 页。按钮复用站点自己的 `elementor-button elementor-button-link elementor-size-sm` 结构，所以外观由主题拥有。metform 脚本故意保留加载：没容器就不渲染任何东西，删标签会弄动构建器与缓存比对的引用计数，却没有任何可见收益。
 
 底部工具栏那一行：站主 2026-11-05 先选择不动，2026-11-06 改口要求修复，于是做成了构建期规则（`replaceMobileToolbar` + `MOBILE_TOOLBAR` 表），这样重建不会洗掉。后台主题选项里改仍然是更根本的做法——镜像里的规则只是把站主已确认的偏好固化下来。门禁 `check.mjs` 7c 用幂等性断言：对已发布页面重跑一次替换必须**一字不差且仍找到 1 个栏**，这样检查器不需要自己再解析一遍区域就能证明产物等于诉求。
 

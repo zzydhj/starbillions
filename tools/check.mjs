@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, walk } from './lib/fs-utils.js';
 import { FLOATER_POSITIONS, ORIGIN_URLS, removeDeadShopControls, resolvesInOutput } from './ingest/wp/staticize.js';
-import { COPYRIGHT_YEAR, ENQUIRE_LABELS, MOBILE_TOOLBAR, replaceMobileToolbar } from './lib/site-links.js';
+import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRE_LABELS, MOBILE_TOOLBAR, replaceMobileToolbar } from './lib/site-links.js';
 import { discover } from './mirror.mjs';
 
 /** The origin the mirror was built for, read from its own build report. */
@@ -425,6 +425,26 @@ check(
   'english pages open with an english page name',
   zhTitles.length === 0,
   `${zhTitles.length} page(s): ${zhTitles.slice(0, 3).join('; ')}`,
+);
+
+/* 7e. no page offers a form that cannot be submitted ------------------------ */
+
+/**
+ * The metform widget posted to a REST endpoint, which a static host has no way to
+ * answer: the visitor got no confirmation and no error, which is the worst possible
+ * outcome for an enquiry channel. Asserted by absence of the container and the
+ * endpoint, and - because an absence alone can also mean the rule stopped matching -
+ * by the button being present on a real number of pages.
+ */
+const liveForms = documents.filter((doc) => doc.text.includes('mf-form-wrapper')
+  || doc.text.includes('metform/v1/entries/insert'));
+const formButtons = documents.filter((doc) => doc.text.includes(CONTACT_FORM_LABELS.zh)
+  || doc.text.includes(CONTACT_FORM_LABELS.en));
+
+check(
+  'no page still offers a contact form that cannot be submitted',
+  liveForms.length === 0 && formButtons.length > 0,
+  `${liveForms.length} page(s) still carry the form, ${formButtons.length} carry the WhatsApp button`,
 );
 
 /* 8. the static search replaces the origin's AJAX one ------------------------- */

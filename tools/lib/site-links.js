@@ -191,6 +191,81 @@ export function translateEnglishTitle(html, outPath, table = EN_PAGE_TITLES) {
 }
 
 /**
+ * Replace the contact form with one WhatsApp button, everywhere it appears.
+ *
+ * The form is a metform widget, and metform renders its fields at runtime from a
+ * template inside a `<script type="text/mf">` block - the static HTML only carries
+ * the container and the schema. That is why the fields survive a build that copies
+ * pages faithfully: nothing was ever broken in the mirror, the endpoint it posts to
+ * (`/wp-json/metform/v1/entries/insert/16312`) simply does not exist on a static
+ * host, so a visitor filled the form, pressed send, and got no answer and no error.
+ *
+ * The widget is cut whole and replaced with the site's own button markup - the same
+ * `elementor-button elementor-button-link elementor-size-sm` structure the product
+ * enquiry buttons use - so the result is styled by the theme rather than by anything
+ * added here, which is what "unify" has to mean for a button.
+ *
+ * The metform scripts are deliberately left loaded: with no container they render
+ * nothing, and removing the tags would change the reference counts the build compares
+ * against the cache for no user-visible gain.
+ *
+ * Two containers, because the form reaches pages two ways. On ordinary pages it is
+ * an Elementor widget (`elementor-widget-metform`), which is what the header and
+ * footer template carries on 211 pages. On metform's own pages the plugin prints the
+ * form wrapper directly into the content with no widget around it, so the inner
+ * `mf-form-wrapper` is cut as well - after the outer pass, which means a page with
+ * both is edited once, not twice.
+ */
+export const CONTACT_FORM_LABELS = {
+  zh: '通过 WhatsApp 联系我们',
+  en: 'Contact us on WhatsApp',
+};
+
+/** Class tokens that identify a metform form container, outermost first. */
+export const CONTACT_FORM_MARKERS = ['elementor-widget-metform', 'mf-form-wrapper'];
+
+export function replaceContactForm(html, { whatsappUrl, label }) {
+  if (!whatsappUrl) return { html, replaced: 0 };
+
+  let output = html;
+  let replaced = 0;
+
+  const button = [
+    '<div class="elementor-element elementor-widget elementor-widget-button" data-element_type="widget" data-widget_type="button.default">',
+    '  <div class="elementor-widget-container">',
+    '    <div class="elementor-button-wrapper">',
+    `      <a class="elementor-button elementor-button-link elementor-size-sm" href="${whatsappUrl}" target="_blank" rel="noopener noreferrer">`,
+    '        <span class="elementor-button-content-wrapper">',
+    `          <span class="elementor-button-text">${label}</span>`,
+    '        </span>',
+    '      </a>',
+    '    </div>',
+    '  </div>',
+    '</div>',
+  ].join('\n');
+
+  for (const marker of CONTACT_FORM_MARKERS) {
+    let cursor = 0;
+    for (;;) {
+      const found = output.indexOf(marker, cursor);
+      if (found === -1) break;
+
+      const start = enclosingTag(output, found, 'div');
+      if (start === -1) {
+        cursor = found + marker.length;
+        continue;
+      }
+
+      output = output.slice(0, start) + button + output.slice(matchingClose(output, start, 'div'));
+      replaced += 1;
+      cursor = start + button.length;
+    }
+  }
+
+  return { html: output, replaced };
+}
+
+/**
  * Hand the search box over to the static implementation.
  *
  * Two things happen here and both are needed. The theme's own autocomplete is keyed off
