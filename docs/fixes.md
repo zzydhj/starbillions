@@ -43,7 +43,9 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 
 浏览器把它们解析成 `http://0.0.0.1/`、`http://0.0.0.3/`、`http://xn--wlqy7if5af60e/`。根因是 WordPress 菜单里这些项的 URL 被填成了裸数字/中文（原形应为 `/产品中心/xxx`），WordPress 补上了 `http://` 协议。全站范围内这类坏 href 的出现量远大于首页（早先统计 `http://1` 1477 处、`http://3` 422 处、`http://热卖产品` 211 处），**建议在后台用"菜单"编辑器逐项修正**。
 
-**2026-11-06 进展**：实测确认这些项全部是 `menu-item-type-custom` 的 mega menu 父项，标签在 `<span class="nav-link-text">` 里。其中**有真实页面的已修**（`repairMenuLinks` + `MENU_LABEL_LINKS`，按标签匹配，共 422 处：串口屏、转接板、Serial screen、adapter board → 各自的分类页）。**未修的 16 个分组标题**（`http://1` 1484 处 + `http://热卖产品` 212 处）：它们是跨多个分类的尺寸区间（"1.28-2.1英寸液晶显示屏"…）和首页板块（热卖产品 / hot deals），**没有任何单一页面能对应**；而 markup 里不存在独立展开按钮（`wd-submenu-toggle` 0 处）、主题 JS 也不引用 `woodmart-nav-link`，说明手机端就靠点这个链接本身展开——直接删 href 会把"点了报错"换成"分组在手机上再也进不去"。要真正修好需要站主先定目标页（或删掉父项链接、改成不可点的分组标题并接受手机端行为变化）。
+**2026-11-06 进展现状（已闭合）**：实测确认这些项全部是 `menu-item-type-custom` 的 mega menu 父项，标签在 `<span class="nav-link-text">` 里。**全站 2110 条此类链接已全部修完**（`repairMenuLinks`），目标按两个来源取：① 标签表（串口屏 / 转接板 / Serial screen / adapter board → 各自分类页）；② 否则取**该分组自己面板里的第一个链接**，优先 `/product-category/`、其次 `/product/`（探针：8/8 均能取到，0 取不到）。两者都取不到则摘掉 href（当前 0 例）。门禁现在绝对断言“no menu link points at an origin that is not a real site”，不再把残留当作 info——之前的 info 写法让 1696 条死链以“提示”形式通过了。
+
+（早期版本曾写“16 个分组标题故意没动”，理由是删 href 可能影响手机端展开。该结论已被推翻：面板里本就有真实链接，不需要删 href。另外实测也确认 markup 里没有 `wd-submenu-toggle`、主题 JS 不引用 `woodmart-nav-link`，所以展开行为本来就靠这个链接本身——保留可点击链接才是保留原行为。）
 
 ---
 

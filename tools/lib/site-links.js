@@ -72,32 +72,122 @@ export const MENU_LABEL_LINKS = {
 };
 
 /**
- * Give those menu items their real destination, matched on their own label.
+ * Give those menu items their real destination.
  *
- * The anchor and its `<span class="nav-link-text">` are rewritten together: the
- * dropdown markup puts the label after the href, so the pair has to be handled as one
- * unit, and the label may carry `&#038;` entities that must be decoded before the
- * comparison.
+ * Two sources, tried in order, and neither is invented by this file:
+ *
+ *   1. the label table, where a page is known for the label itself;
+ *   2. the first link inside that item's own dropdown panel - the ordering the site
+ *      already publishes for that group, preferring a category listing over a single
+ *      product because a heading should open a list.
+ *
+ * An item with neither has its href removed rather than pointed at the homepage: a
+ * heading with no destination is honest, and a heading that lies about one is the bug
+ * this function exists to fix.
+ *
+ * Edits are applied back to front, because rewriting the first anchor shifts every
+ * offset the scan was working from - the symptom of getting that wrong is a corrupted
+ * page much further down, far from the change that caused it.
  */
 export function repairMenuLinks(html, links = MENU_LABEL_LINKS) {
-  const dead = /<a\b[^>]*href="https?:\/\/[^"\/]*"[^>]*class="[^"]*woodmart-nav-link[^"]*"[^>]*>[\s\S]{0,900}?<\/a>/g;
+  const opening = /<a\b[^>]*href="(https?:\/\/[^"\/]*)"[^>]*class="[^"]*woodmart-nav-link[^"]*"[^>]*>/g;
+  const edits = [];
+
+  for (const match of html.matchAll(opening)) {
+    const host = match[1].split('//')[1];
+    // A host with a dot in it is somebody's real external site, not a typo.
+    if (!host || /\./.test(host)) continue;
+
+    const li = html.lastIndexOf('<li', match.index);
+    if (li === -1) continue;
+
+    const panel = html.slice(match.index + match[0].length, matchingClose(html, li, 'li'));
+    const label = decodeEntities(/nav-link-text">([^<]*)</.exec(match[0] + panel)?.[1] ?? '').trim();
+    const target = links[label]
+      ?? /href="(\/[^"#]*product-category\/[^"]+)"/.exec(panel)?.[1]
+      ?? /href="(\/[^"#]*product\/[^"]+)"/.exec(panel)?.[1]
+      ?? /href="(\/[^"#]+)"/.exec(panel)?.[1]
+      ?? null;
+
+    edits.push({ at: match.index, tag: match[0], target });
+  }
+
+  let output = html;
   let repaired = 0;
+  let dropped = 0;
 
-  const output = html.replace(dead, (anchor) => {
-    // A URL that is a real host with a dot in it is somebody's genuine external link.
-    const href = /href="(https?:\/\/[^"\/]*)\/?"/.exec(anchor)?.[1];
-    if (!href || /\./.test(href.split('//')[1])) return anchor;
+  for (const edit of edits.reverse()) {
+    const tag = edit.target
+      ? edit.tag.replace(/href="[^"]*"/, `href="${edit.target}"`)
+      : edit.tag.replace(/\s+href="[^"]*"/, '');
+    output = output.slice(0, edit.at) + tag + output.slice(edit.at + edit.tag.length);
+    if (edit.target) repaired += 1;
+    else dropped += 1;
+  }
 
-    const raw = /nav-link-text">([^<]*)</.exec(anchor)?.[1] ?? '';
-    const label = raw.replace(/&#0*38;/g, '&').replace(/&nbsp;/g, ' ').trim();
-    const target = links[label];
-    if (!target) return anchor;
+  return { html: output, repaired, dropped };
+}
 
-    repaired += 1;
-    return anchor.replace(/href="[^"]*"/, `href="${target}"`);
-  });
+function decodeEntities(text) {
+  return text.replace(/&#0*38;/g, '&').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ');
+}
 
-  return { html: output, repaired };
+/**
+ * The English pages whose browser tab still reads a Chinese page name.
+ *
+ * Ten of the 108 English pages have a Chinese string where the page name should be.
+ * Most of those strings the site already publishes in English elsewhere - its own
+ * English menu says "Serial screen" and "adapter board", and the WordPress defaults
+ * arrive in English - so those are transcriptions, not translations.
+ *
+ * The company suffix is deliberately kept in Chinese on every page: it is the
+ * registered name, and the mirror contains no English legal name to substitute.
+ * What gets translated is the page name in front of it - except on `en/index.html`,
+ * where the title is nothing but the registered name. That page is given the brand
+ * the site already publishes in English (`Starbillions 2.1″ round TFT ...`, and the
+ * domain itself) as its leading page name, so that every English page opens with an
+ * English word instead of the homepage being the one exception in the tree.
+ */
+export const EN_PAGE_TITLES = {
+  'en/index.html': 'Starbillions',
+  'en/联系我们/index.html': 'Contact Us',
+  'en/关于我们/index.html': 'About Us',
+  'en/product-category/串口屏/index.html': 'Serial Screen',
+  'en/product-category/转接板/index.html': 'Adapter Board',
+  'en/product-category/qspi屏测试板/index.html': 'QSPI Screen Test Board',
+  'en/metform-form/在线留言/index.html': 'Online Message',
+  'en/metform-form/联系表单2/index.html': 'Contact Form 2',
+  'en/sample-page/index.html': 'Sample Page',
+  'en/woodmart_slider/123/index.html': 'Home Banner',
+};
+
+/**
+ * Swap the page-name half of an English document's title, keeping the suffix.
+ *
+ * Only the part before the separator is touched, and only when the table names this
+ * exact output file - so a page whose title someone later fixes in WordPress simply
+ * stops matching instead of being rewritten twice.
+ */
+export function translateEnglishTitle(html, outPath, table = EN_PAGE_TITLES) {
+  const label = table[outPath];
+  if (!label) return { html, changed: false };
+
+  const current = /<title>([\s\S]*?)<\/title>/i.exec(html)?.[1];
+  if (current === undefined) return { html, changed: false };
+
+  const parts = current.split(/&#8211;|–/);
+
+  // A title with no separator is the site name alone. Lead with the English brand and
+  // keep the registered name as the suffix, which is the shape every other page has.
+  if (parts.length === 1) {
+    if (!/[\u4e00-\u9fff]/.test(current)) return { html, changed: false };
+    return { html: html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${label} &#8211; ${current.trim()}</title>`), changed: true };
+  }
+
+  if (!/[\u4e00-\u9fff]/.test(parts[0])) return { html, changed: false };
+
+  const title = [label, ...parts.slice(1)].join(' &#8211;');
+  return { html: html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${title}</title>`), changed: true };
 }
 
 /**
@@ -214,21 +304,29 @@ export function whatsappUrlFor(input, { defaultCountryCode = '86' } = {}) {
  * really wrote - TranslatePress keeps the Chinese slug for the default language and
  * the mirror reproduces it, so an invented English slug would 404.
  *
- * The icons are plain <img> with no lazy placeholder. The bar is above the fold on
- * every phone and holds three small files, and the site's own lazy mechanism is what
- * left the first item's icon working while the theme's deferred loading never fired
- * for product thumbnails in testing.
+ * The icons are inline SVG with `fill="currentColor"`, not image files. That is a
+ * deliberate unification, measured: the site's own `uploads/2023/11/phone.svg` has
+ * `#0066b6` baked into it and does not read currentColor, while a hand-drawn file was
+ * dark, so three items in one bar rendered in two different colours and nothing in CSS
+ * could have reconciled them. Inheriting the link's text colour makes the theme the
+ * single owner of the icon colour, hover state and colour scheme included.
  */
+export const MOBILE_TOOLBAR_ICONS = {
+  phone: 'M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.02-.24 11.36 11.36 0 0 0 3.56.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02z',
+  grid: 'M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z',
+  envelope: 'M3 5h18a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm1.5 2.6V17h15V7.6l-7.5 5z',
+};
+
 export const MOBILE_TOOLBAR = {
   zh: [
-    { label: '电话', href: `tel:+86${ENQUIRY_PHONE}`, icon: '/wp-content/uploads/2023/11/phone.svg' },
-    { label: '产品中心', href: '/产品中心/', icon: '/icons/products.svg' },
-    { label: '联系我们', href: '/联系我们/', icon: '/icons/contact.svg' },
+    { label: '电话', href: `tel:+86${ENQUIRY_PHONE}`, icon: 'phone' },
+    { label: '产品中心', href: '/产品中心/', icon: 'grid' },
+    { label: '联系我们', href: '/联系我们/', icon: 'envelope' },
   ],
   en: [
-    { label: 'Call', href: `tel:+86${ENQUIRY_PHONE}`, icon: '/wp-content/uploads/2023/11/phone.svg' },
-    { label: 'Products', href: '/en/产品中心/', icon: '/icons/products.svg' },
-    { label: 'Contact', href: '/en/联系我们/', icon: '/icons/contact.svg' },
+    { label: 'Call', href: `tel:+86${ENQUIRY_PHONE}`, icon: 'phone' },
+    { label: 'Products', href: '/en/产品中心/', icon: 'grid' },
+    { label: 'Contact', href: '/en/联系我们/', icon: 'envelope' },
   ],
 };
 
@@ -278,7 +376,7 @@ function toolbarMarkup(openTag, entries) {
     '          <div class="wd-toolbar-link wd-tools-element wd-toolbar-item wd-tools-custom-icon">',
     `            <a href="${href}">`,
     '              <span class="wd-toolbar-icon wd-tools-icon wd-icon wd-custom-icon">',
-    `                <img width="1024" height="1024" src="${icon}" class="attachment-thumbnail size-thumbnail" alt="" />`,
+    `                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${MOBILE_TOOLBAR_ICONS[icon]}"/></svg>`,
     '              </span>',
     `              <span class="wd-toolbar-label">${label}</span>`,
     '            </a>',

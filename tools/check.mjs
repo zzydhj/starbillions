@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, walk } from './lib/fs-utils.js';
 import { FLOATER_POSITIONS, ORIGIN_URLS, removeDeadShopControls, resolvesInOutput } from './ingest/wp/staticize.js';
-import { COPYRIGHT_YEAR, ENQUIRE_LABELS, MENU_LABEL_LINKS, MOBILE_TOOLBAR, replaceMobileToolbar } from './lib/site-links.js';
+import { COPYRIGHT_YEAR, ENQUIRE_LABELS, MOBILE_TOOLBAR, replaceMobileToolbar } from './lib/site-links.js';
 import { discover } from './mirror.mjs';
 
 /** The origin the mirror was built for, read from its own build report. */
@@ -339,9 +339,15 @@ for (const doc of bars) {
     if (!/^(tel:|mailto:|https?:)/.test(entry.href) && !resolvesInOutput(known, entry.href)) {
       badBars.push(`${doc.rel}: ${entry.href} has no page behind it`);
     }
-
-    if (!known.has(entry.icon.replace(/^\//, ''))) badBars.push(`${doc.rel}: icon ${entry.icon} was not shipped`);
   }
+
+  // The three icons must share one colour source. A baked hex in any of them is what
+  // made the bar look inconsistent in the first place, and CSS cannot reconcile it.
+  const bar = /<div class="wd-toolbar wd-toolbar-label-show">[\s\S]{0,2400}<\/div>\s*<\/(?:div|body)/.exec(doc.text)?.[0] ?? '';
+  const coloured = (bar.match(/#[0-9a-f]{3,8}\b/gi) || []).length;
+  const inherited = (bar.match(/fill="currentColor"/g) || []).length;
+  if (inherited !== entries.length) badBars.push(`${doc.rel}: ${inherited} of ${entries.length} icons inherit the colour`);
+  if (coloured > 0) badBars.push(`${doc.rel}: ${coloured} baked colour(s) in the bar`);
 }
 
 check(
@@ -381,43 +387,45 @@ check(
 );
 
 /**
- * Menu items whose URL field held a bare number. Those with a real page are routed to
- * it; the group headings are not, because no single page answers for a size range and
- * the theme has no separate submenu toggle - dropping their href would leave the group
- * unreachable on a phone.
+ * Menu items whose URL field held a bare number. Every one of them is now either
+ * routed - to the label table, or to the first listing inside its own dropdown panel
+ * - or unlinked entirely, which leaves an honest heading where a broken promise was.
  *
- * Which bare-number hrefs may remain is therefore decided by the item's label, so the
- * assertion is decided by the label too, against the build's own table: a heading the
- * table knows must no longer carry a dead origin, a heading the table omits is counted
- * and shown. Counting every `href="http://N"` instead would fail on the group headings
- * the build deliberately leaves, which is a wrong predicate, not a wrong build.
+ * The invariant is absolute, so it is asserted absolutely: no navigation link on any
+ * page may carry a URL whose host is a number, a Chinese string, or anything else
+ * that is not a real site. Counting the leftovers as informational was the previous
+ * behaviour, and it let 1696 dead links through as a note.
  */
-const NAV_ITEM = /<a\b[^>]*href="(https?:\/\/[^"\/]*)"[^>]*class="[^"]*woodmart-nav-link[^"]*"[^>]*>[\s\S]{0,900}?nav-link-text">([^<]*)</g;
-const knownLabels = new Set(Object.keys(MENU_LABEL_LINKS));
-const unrepaired = [];
-const unmapped = new Map();
-
+const deadNav = [];
 for (const doc of documents) {
-  for (const match of doc.text.matchAll(NAV_ITEM)) {
-    const host = match[1].split('//')[1];
-    if (host.includes('.')) continue; // a genuine external site
-
-    const label = match[2].replace(/&#0*38;/g, '&').replace(/&nbsp;/g, ' ').trim();
-    if (knownLabels.has(label)) unrepaired.push(`${doc.rel}: ${label} -> ${match[1]}`);
-    else unmapped.set(label || host, (unmapped.get(label || host) || 0) + 1);
+  for (const match of doc.text.matchAll(/<a\b[^>]*href="https?:\/\/([^"\/]*)"[^>]*class="[^"]*woodmart-nav-link[^"]*"/g)) {
+    if (!match[1].includes('.')) deadNav.push(`${doc.rel}: http://${match[1]}`);
   }
 }
 
 check(
-  'every menu item the build knows a page for reaches that page',
-  unrepaired.length === 0,
-  unrepaired.length === 0
-    ? `${knownLabels.size} label(s) routed, none left dead`
-    : `${unrepaired.length} still dead: ${unrepaired.slice(0, 3).join('; ')}`,
+  'no menu link points at an origin that is not a real site',
+  deadNav.length === 0,
+  `${deadNav.length} dead link(s): ${deadNav.slice(0, 3).join('; ')}`,
 );
 
-const left = [...unmapped].sort((a, b) => b[1] - a[1]).map(([label, n]) => `${label}=${n}`).join(', ');
-notes.push(`  info  menu headings with no page to route to, left as authored: ${left || 'none'}`);
+/**
+ * English pages whose tab still reads a Chinese page name. The company suffix is
+ * excluded on purpose: that half is a registered name, and en/index.html is titled
+ * nothing else, so a Chinese string there is correct.
+ */
+const zhTitles = [];
+for (const doc of documents) {
+  if (!doc.rel.startsWith('en/')) continue;
+  const page = (/<title>([\s\S]*?)<\/title>/i.exec(doc.text)?.[1] ?? '').split(/&#8211;|–/)[0];
+  if (/[\u4e00-\u9fff]/.test(page)) zhTitles.push(`${doc.rel}: ${page.replace(/\s+/g, ' ').trim().slice(0, 40)}`);
+}
+
+check(
+  'english pages open with an english page name',
+  zhTitles.length === 0,
+  `${zhTitles.length} page(s): ${zhTitles.slice(0, 3).join('; ')}`,
+);
 
 /* 8. the static search replaces the origin's AJAX one ------------------------- */
 

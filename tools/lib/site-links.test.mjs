@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { COPYRIGHT_YEAR, MOBILE_TOOLBAR, repairMenuLinks, replaceMobileToolbar, rewriteInquireButtons, updateCopyrightYear, whatsappUrlFor } from './site-links.js';
+import { COPYRIGHT_YEAR, EN_PAGE_TITLES, MOBILE_TOOLBAR, repairMenuLinks, replaceMobileToolbar, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './site-links.js';
 
 const URL = 'https://wa.me/8613714286517';
 const LABELS = ['Inquire about this product', '咨询此产品'];
@@ -105,6 +105,17 @@ test('replaceMobileToolbar rewrites the bar without leaving the dead host behind
   assert.match(html, /href="\/产品中心\/"/);
 });
 
+test('replaceMobileToolbar gives all three icons the same colour source', () => {
+  const { html } = replaceMobileToolbar(BAR, MOBILE_TOOLBAR.zh);
+
+  // The site's own phone.svg carries #0066b6 and ignores currentColor, which is why
+  // one item rendered blue beside two dark ones. Nothing in CSS can reconcile baked
+  // file colours, so the bar must not contain a baked colour at all.
+  assert.equal((html.match(/fill="currentColor"/g) || []).length, MOBILE_TOOLBAR.zh.length, 'every icon inherits the link colour');
+  assert.ok(!/#0066b6/i.test(html), 'no icon brings its own colour');
+  assert.ok(!html.includes('<img'), 'no image file to go out of date');
+});
+
 test('replaceMobileToolbar keeps the block balanced when an item nests further divs', () => {
   // The cut is a tag-pair scan, so an unbalanced end would either swallow the rest of
   // the page or leave the closing tag of the bar behind.
@@ -160,18 +171,63 @@ test('repairMenuLinks routes the bare-number menu items that have a real page', 
   assert.ok(!out.includes('http://3'), 'no bare-number origin survives where a page is known');
 });
 
-test('repairMenuLinks leaves alone what it cannot map', () => {
-  const group = '<a href="http://1" class="woodmart-nav-link"><span class="nav-link-text">1.28-2.1英寸液晶显示屏</span></a>';
-  const entity = '<a href="http://1" class="woodmart-nav-link"><span class="nav-link-text">圆形&#038;长条形显示屏</span></a>';
-  const external = '<a href="https://twitter.com/starbillions" class="woodmart-nav-link"><span class="nav-link-text">Twitter</span></a>';
-  const bareHost = '<a href="http://example.com" class="woodmart-nav-link"><span class="nav-link-text">Example</span></a>';
-  const html = group + entity + external + bareHost;
+test('repairMenuLinks takes an unmapped heading from its own dropdown panel', () => {
+  // A size range has no page of its own, but the panel under it already lists the
+  // site's ordering for that range, so the first entry there is the site's answer and
+  // not this file's guess. A category is preferred to a product: a heading should
+  // open a list.
+  const html = '<li id="menu-item-9"><a href="http://1" class="woodmart-nav-link">' +
+    '<span class="nav-link-text">1.28-2.1英寸液晶显示屏</span></a>' +
+    '<div class="wd-dropdown"><ul><li><a href="/product/xby128/">1.28″ TFT</a></li>' +
+    '<li><a href="/product-category/1-28-inch-lcd-display/">1.28 inch</a></li></ul></div></li>';
 
-  const { html: out, repaired } = repairMenuLinks(html);
+  const { html: out, repaired, dropped } = repairMenuLinks(html);
 
-  // A size range is a heading over several categories and 圆形&长条形显示屏 is a menu
-  // label with no page of its own; pointing either at one category would be an
-  // invented destination presented as a repair.
-  assert.equal(repaired, 0, 'nothing here has a destination the mirror can prove');
+  assert.equal(repaired, 1);
+  assert.equal(dropped, 0);
+  assert.match(out, /href="\/product-category\/1-28-inch-lcd-display\/"/, 'the listing, not the single product');
+});
+
+test('repairMenuLinks unlinks a heading with nowhere honest to go', () => {
+  const html = '<li id="menu-item-9"><a href="http://1" class="woodmart-nav-link">' +
+    '<span class="nav-link-text">圆形&#038;长条形显示屏</span></a><div class="wd-dropdown">（空面板）</div></li>';
+
+  const { html: out, repaired, dropped } = repairMenuLinks(html);
+
+  assert.equal(repaired, 0);
+  assert.equal(dropped, 1);
+  assert.ok(!out.includes('http://1'), 'the dead origin is gone');
+  assert.match(out, /<a class="woodmart-nav-link">/, 'the heading survives, without a link');
+});
+
+test('repairMenuLinks never touches a real external link', () => {
+  const html = '<li><a href="https://twitter.com/starbillions" class="woodmart-nav-link">' +
+    '<span class="nav-link-text">Twitter</span></a></li>';
+
+  const { html: out, repaired, dropped } = repairMenuLinks(html);
+
+  assert.equal(repaired + dropped, 0);
   assert.equal(out, html);
+});
+
+test('translateEnglishTitle replaces the page name and keeps the company suffix', () => {
+  const html = '<title>联系我们 &#8211; 深圳市星百亿电子有限公司</title>';
+  const { html: out, changed } = translateEnglishTitle(html, 'en/联系我们/index.html');
+
+  assert.equal(changed, true);
+  assert.match(out, /^<title>Contact Us &#8211; 深圳市星百亿电子有限公司<\/title>/);
+
+  // The homepage is titled nothing but the registered name, so it is given the brand
+  // the site already publishes in English as its page name, keeping the Chinese legal
+  // name as the suffix - the same shape every other English page has.
+  const home = '<title>深圳市星百亿电子有限公司</title>';
+  const titled = translateEnglishTitle(home, 'en/index.html');
+  assert.equal(titled.changed, true);
+  assert.match(titled.html, /^<title>Starbillions &#8211; 深圳市星百亿电子有限公司<\/title>/);
+  assert.equal(translateEnglishTitle(titled.html, 'en/index.html').changed, false, 'running it again does not stack a second brand');
+
+  const already = '<title>Contact Us &#8211; 深圳市星百亿电子有限公司</title>';
+  assert.equal(translateEnglishTitle(already, 'en/联系我们/index.html').changed, false, 'someone fixing it upstream stops the edit');
+
+  assert.ok(Object.keys(EN_PAGE_TITLES).every((path) => path.startsWith('en/')), 'the table only names English pages');
 });
