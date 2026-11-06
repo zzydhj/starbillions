@@ -319,6 +319,61 @@ export function removeDeadTabsNavigation(html, widgets = DEAD_TAB_WIDGETS) {
   return { html: output, removed };
 }
 
+/**
+ * Scripts whose only working feature is a request a static host cannot answer.
+ *
+ * `trp-translate-dom-changes.js` is TranslatePress's dynamic translator: a
+ * MutationObserver that batches strings added to the DOM after load and POSTs them to
+ * the plugin's `trp-ajax.php`, falling back to `admin-ajax.php` when that 404s. On this
+ * mirror every page arrives already translated in its HTML, so the request can never
+ * succeed: each English page fired 2-4 POSTs at load and logged the failures as console
+ * errors, while Chinese pages - which do not load this file - logged none. That
+ * asymmetry is the evidence that removing it costs nothing: a feature that has never
+ * worked on this host cannot be broken by deleting it. The plugin's compatibility script,
+ * which the language switcher and the floating selector actually use, is left alone, and
+ * so is the `trp_data` object it reads.
+ *
+ * Checked before writing the rule: the symbol that file defines (`TRP_Translator`) is
+ * referenced by no page and by no other script in the backup, so nothing is left
+ * calling an undefined constructor.
+ */
+export const DEAD_AJAX_SCRIPTS = ['trp-translate-dom-changes.js'];
+
+export function removeDeadAjaxScripts(html, scripts = DEAD_AJAX_SCRIPTS) {
+  let output = html;
+  const removed = [];
+
+  for (const script of scripts) {
+    /**
+     * An external script has an empty body by definition, so requiring only whitespace
+     * between the tags means an inline block that merely mentions the file cannot be
+     * deleted by accident. The reference sits in `src` or, when WP Rocket delays the
+     * load, in `data-rocket-src` - matched both, with either quoting, so one filename
+     * is one rule instead of three.
+     */
+    const pattern = new RegExp(
+      `<script\\b[^>]*(?:src|data-rocket-src)="[^"]*${escapeForRegExp(script)}[^"]*"[^>]*>\\s*</script>|` +
+      `<script\\b[^>]*(?:src|data-rocket-src)='[^']*${escapeForRegExp(script)}[^']*'[^>]*>\\s*</script>`,
+      'gi',
+    );
+    const count = (output.match(pattern) || []).length;
+    if (count === 0) continue;
+
+    const shortened = output.replace(pattern, '');
+    if (shortened.length >= output.length) continue;
+
+    output = shortened;
+    removed.push({ script, count });
+  }
+
+  return { html: output, removed, count: removed.reduce((total, entry) => total + entry.count, 0) };
+}
+
+/** Escape a literal filename for use inside new RegExp. */
+function escapeForRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /** Remove every <div> in `html` that carries one of `names` as a whole class token. */
 function cutClassBlocks(html, names) {
   let output = html;

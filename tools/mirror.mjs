@@ -53,6 +53,8 @@ import {
   originSet,
   rebaseIdentityUrls,
   referencesIn,
+  removeDeadAjaxScripts,
+  DEAD_AJAX_SCRIPTS,
   removeDeadAjaxWidgets,
   removeDeadShopControls,
   removeDeadTabsNavigation,
@@ -306,7 +308,7 @@ export async function build({ quiet = false } = {}) {
   let written = 0;
   let copied = 0;
   let homeHtml = '';
-  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0, formsReplaced: 0, mapsReplaced: 0, fontsLocal: 0, fontsMissing: 0, demoMenuItems: 0, deadWidgets: 0, deadTabControls: 0, phoneLinks: 0 };
+  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0, formsReplaced: 0, mapsReplaced: 0, fontsLocal: 0, fontsMissing: 0, demoMenuItems: 0, deadWidgets: 0, deadTabControls: 0, deadScripts: 0, phoneLinks: 0 };
   // Written by npm run fonts. An absent manifest is a normal state - the mirror has
   // no network step - so it reads as "keep the original links", not as an error.
   const fontManifestPath = join(paths.public, 'fonts', 'manifest.json');
@@ -338,7 +340,12 @@ export async function build({ quiet = false } = {}) {
     const detabbed = removeDeadTabsNavigation(unwidged.html);
     stats.deadTabControls += detabbed.removed;
 
-    const out = rewriteReferences(detabbed.html, {
+    // And the script that only exists to ask PHP for translations: on English pages it
+    // fired 2-4 POSTs per load, all 404, and on this host it can never do anything else.
+    const unscripted = removeDeadAjaxScripts(detabbed.html);
+    stats.deadScripts += unscripted.count;
+
+    const out = rewriteReferences(unscripted.html, {
       pageUrl: page.pageUrl,
       origins,
       /**
@@ -458,6 +465,25 @@ export async function build({ quiet = false } = {}) {
   // land on Pages' own branded error page instead of the site's.
   await writeFileAsync(join(paths.dist, '404.html'), build404(homeHtml), 'utf8');
 
+  /**
+   * A file whose only reference was a script we deliberately removed must not ship.
+   *
+   * Asset discovery runs over the cached page text rather than the written page, on
+   * purpose - half of this site's references hide in data attributes or JSON, and an
+   * attribute list missed them twice. The side effect is that deleting a reference from
+   * the output does not delete it from the input, so the removed TranslatePress
+   * translator would still have been copied, 26 KB that nothing loads. Pruning by the
+   * same list the rule uses keeps one source of truth and leaves the follow-hops (a
+   * stylesheet's url(), a script's webpack chunks) exactly as they were.
+   */
+  let pruned = 0;
+  for (const [path] of [...assets]) {
+    if (!DEAD_AJAX_SCRIPTS.some((name) => path.endsWith(name))) continue;
+
+    assets.delete(path);
+    pruned += 1;
+  }
+
   const copies = [...assets].filter(([, kind]) => kind === 'copy').map(([path]) => path);
   await pool(copies, async (path) => {
     const key = assetKey(path);
@@ -498,6 +524,7 @@ export async function build({ quiet = false } = {}) {
   console.log(`  fonts          ${stats.fontsLocal} link(s) local, ${stats.fontsMissing} not in the manifest${Object.keys(fontManifest).length ? '' : ' (npm run fonts has not been run)'}`);
   console.log(`  mobile bar     ${stats.mobileBars} bar(s) rebuilt from the owner's entries`);
   console.log(`  stale bits     ${stats.copyrightYears} page(s) re-dated, ${stats.menuLinks} menu link(s) routed, ${stats.menuHrefsDropped} heading(s) unlinked, ${stats.titlesFixed} English title(s) fixed`);
+  console.log(`  dead scripts   ${stats.deadScripts} script(s) whose only working feature is a PHP endpoint, ${pruned} file(s) not copied any more`);
   console.log(`  phone links    ${stats.phoneLinks} tel: link(s) redialled from the theme's demo number to +86${ENQUIRY_PHONE}`);
   console.log(`  search         ${index.length} entries (${index.filter((e) => e.lang === 'en').length} en), ${stats.searchWired} pages wired`);
   console.log(`  uncached links ${unknownPages.size} targets the mirror links to but never rendered`);

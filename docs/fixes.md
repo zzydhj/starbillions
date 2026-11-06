@@ -73,12 +73,14 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 | 产品搜索 | `admin-ajax.php?action=woodmart_ajax_search` | **已重建为纯静态**：`dist/search.json` + `public/site-search.js`，本地匹配，实测可用（见 README） |
 | ~~首页“热门产品分类”4 个页签~~ | `admin-ajax.php?action=woodmart_get_products_tab_shortcode` | **已于 2026-11-06 修好**（`removeDeadTabsNavigation`）：页签行与 spinner 删掉，**已渲染好的第一个面板（10 张产品卡）与标题保留**。不能整块删，原因见八 |
 | ~~首页色块筛选表单~~ | `wd_product_filters` + `/?filter_size=` | **已于 2026-11-06 删干净**（`removeDeadAjaxWidgets`）：选项 href 指向查询页，而静态站不存查询页 |
-| 分类页价格筛选 | `?min_price=&max_price=` + AJAX | **仍坏**：9 处控件，筛选结果需要服务端查询 |
-| 加载更多 / 产品轮播分页 | `woodmart_get_products_*` | **仍坏** |
+| ~~分类页价格筛选~~ | `?min_price=&max_price=` + AJAX | **不存在——本文此前写错了**。实测：`wd-ajax-filters-widget` / `wd_filters_full` / `wd-slider-range` 出现 **0** 次，`<input type=range>`、`name="min_price"` 也 **0** 个。所谓“9 处控件”是我数子串数出来的误判：那 9 次 `price-filter` 全部在样式表句柄与文件名里（`woo-widget-price-filter.min.css`、一段 CSS 选择器列表、`woodmart_page_css` 这个 JSON 映射），没有一个在页面上 |
+| ~~加载更多 / 产品轮播分页~~ | `woodmart_get_products_*` | **分类页上也没有**（`load-more` / `infinite` 元素 0 个）；商店页的分页是真实的三个缓存页（`/产品中心/`、`page/2/`、`page/3/`），本来就能点 |
+| 分类页的汉堡侧栏 | `offCanvasColumnBtn.min.js`（本地 jQuery） | **能用的，保留**：按钮 `.wd-off-canvas-btn` 在窄屏可见（实测 rect 103×15），面板 `wd-col-offcanvas-sm` 已在 DOM 里（默认 `transform: translateX(-300px)` + `wd-side-hidden`），脚本只做 addClass/removeClass/preventDefault，**不请求任何服务端**；面板里是 25 条真实分类与联系链接。注意：本次会话浏览器窗口隐藏，click 事件派发不下去，所以这一项的证据是“监听代码 + DOM 现状”，不是真点了一下 |
+| ~~英文页动态翻译~~ | `trp-translate-dom-changes.js` → `trp-ajax.php` → `admin-ajax.php` | **已于 2026-11-07 删除**（`removeDeadAjaxScripts`，见八）：英文首页由 2 条 console error 变 0，英文产品页由 4 条变 0 |
 | ~~联系表单（metform）~~ | `POST /wp-json/metform/v1/entries/insert/16312` | **已修（2026-11-06）**：表单删除，每页统一换成跳 WhatsApp 的按钮（当前 137 页，删演示内容前是 217 页，见下）|
 | 加入购物车 / 收藏 / 对比 | `?wc-ajax=`、`admin-ajax.php` | 按站主决定主动去除（仅界面，无后端） |
 
-页签与筛选若要“真的可用”（而不只是不坏），做法与搜索同理：构建时把各页签/各筛选组合的产品列表预先渲染进去，再把主题 JS 改成本地切换。分类页的价格筛选仍是这个状态（9 处控件）。
+页签若要“真的可用”（而不只是不坏），做法与搜索同理：构建时把各页签/各筛选组合的产品列表预先渲染进去，再把主题 JS 改成本地切换。**但剩下的控件已需先看它是否存在**——上一版表里“价格筛选仍坏”、“加载更多仍坏”两条是我数子串数出来的，现已按实测更正为“不存在”。
 
 **注**：做排行榜榜单不在选项里——`data/wp-products.json` 只有 `order` 一个排序字段，没销量也没评分，任何“热销榜”都是编的。
 
@@ -129,7 +131,7 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 
 ---
 
-## 六、只在浏览器控制台里暴露的三处（前两处 2026-11-06 已修，第三处仍在）
+## 六、只在浏览器控制台里暴露的三处（均已于 2026-11-06 / 07 修好）
 
 前两处的共同点：**构建产物看起来完整、所有页面断言都绿**，但浏览器一打开就有错。它们都是“资源发现少走一跳”造成的，所以修的是发现器，不是个例文件。第三处不同：它不是资源缺失，是一个在静态主机上永远不该发的请求。
 
@@ -143,7 +145,7 @@ Elementor 每个 post 生一份 CSS，而 WordPress 写入时用的是**当时�
 
 上面那行“该文件在备份里不存在”的旧结论，错因与本文第五节的路径坑同一个：`uploads/2023/11/10001.png` 与 `uploads/2023-11-10001.png` 在屏幕上看起来一模一样，而探测脚本按后者拼路径去 `existsSync`，当然找不到。这次是先拿 `split('/')` 看了分段，才发现四个文件一直都在。
 
-### 3. 每个英文页都会 POST 两个不存在的 PHP 端点（**未修**）
+### 3. 每个英文页都会 POST 两个不存在的 PHP 端点（**已于 2026-11-07 修好**）
 
 2026-11-06 浏览器实测：`/en/` 首页控制台 2 条 error，英文产品页 4 条；中文页 0 条。请求体是 TranslatePress 自己的：
 
@@ -152,7 +154,17 @@ POST /wp-content/plugins/translatepress-multilingual/includes/trp-ajax.php  -> 4
 POST /wp-admin/admin-ajax.php                                             -> 404
 ```
 
-日志里还有一句 `TranslatePress trp-ajax request uses fall back to admin ajax.`——插件先试自己的端点，失败后回退到 admin-ajax，两个都是静态主机上不可能存在的东西。镜像已经包含翻译好的 HTML，所以这个调用本身是多余的；语言切换靠的是普通 `<a href>`，不依赖它。未修的原因是要先确认删哪些脚本/配置对象不会影响其他 TranslatePress 行为（浮层、hreflang），不能直接猜一个删了就算。
+日志里还有一句 `TranslatePress trp-ajax request uses fall back to admin ajax.`——插件先试自己的端点，失败后回退到 admin-ajax，两个都是静态主机上不可能存在的东西。
+
+**怎么定的**（不猜，三个量）：
+
+1. 这个脚本只在英文页加载（中文页只加载 `trp-frontend-compatibility.js`，而中文页 0 个请求）——症状与文件范围完全对齐，所以它就是原因；
+2. 它定义的唯一导出符号 `TRP_Translator` 在**任何页面和其他脚本里都没被引用**（只在它自己内部 `new`），删了不会留下一个调用未定义构造函数的脚本；
+3. 它的功能（把页面加载后新出现的字符串送去翻译）在镜像上**从来就没成功过**——每个页面的译文已经在 HTML 里，而它的每次请求都是 404。一个从未在这台主机上工作过的功能，不可能因为删了而变坏。
+
+实现是 `removeDeadAjaxScripts`（新清单 `DEAD_AJAX_SCRIPTS`）：只删那个 `<script>` 标签，**保留**语言切换与浮层真正在用的 `trp-frontend-compatibility.js` 和 `trp_data` 配置对象。标签本身有三种写法（WP Rocket 把它改成了 `data-rocket-src` + `type="rocketlazyloadscript"`，本站引号又两种都用），所以规则按文件名匹配整个标签且要求**标签体只能是空白**：内联 JSON 里提到这个文件名的地方因此不会被误删（单测专门守住这一条）。
+
+门禁三条：没有页面还加载它；对产物重跑这条规则必须挖不出东西；**语言切换相关四组计数（兼容脚本、`trp_data`、`trp-floater`、`trp-language`）逐页与缓存页相等**——真正值得担心的不是标签没删掉，而是删的时候把旁边的切换器一并带走了。实测：68 个英文页的标签全部删除，文件不再拷入产物（842 个文件，比之前少一个），英文首页与英文产品页 console error 均为 0、XHR 为 0，`#trp-floater-ls` 浮层仍在且中文链接指回 `/`。
 
 ---
 

@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, walk } from './lib/fs-utils.js';
-import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, DEAD_AJAX_WIDGETS, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadShopControls, removeDeadTabsNavigation, removeOwnerMenuItems, resolvesInOutput } from './ingest/wp/staticize.js';
+import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, DEAD_AJAX_SCRIPTS, DEAD_AJAX_WIDGETS, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadAjaxScripts, removeDeadShopControls, removeDeadTabsNavigation, removeOwnerMenuItems, resolvesInOutput } from './ingest/wp/staticize.js';
 import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRY_PHONE, ENQUIRE_LABELS, MOBILE_TOOLBAR, replaceMobileToolbar, repairPhoneLinks } from './lib/site-links.js';
 import { discover } from './mirror.mjs';
 
@@ -771,6 +771,56 @@ check(
   'no tel: link dials a number that is not the company\'s own',
   unfixedPhones.length === 0 && telValues.size === 1 && telValues.has(`+86${ENQUIRY_PHONE}`),
   `${telValues.size} distinct value(s): ${[...telValues].map(([value, count]) => `${value} x${count}`).join(', ')}`,
+);
+
+/**
+ * The same class of defect as the widgets: a script that posts to admin-ajax.php on
+ * load can only ever fail here, and it fails audibly only in a browser console - two to
+ * four 404s and console errors on every English page, none on the Chinese pages that do
+ * not load it. Three assertions, because the interesting risk is not that the tag
+ * survives but that the fix eats the language switcher it sits next to:
+ *
+ *   - no page loads it (matched on the tag, not on the filename: the surviving
+ *     `trp_data` config block mentions that name in a comment),
+ *   - re-running the builder's rule over the output finds nothing, which is how a rule
+ *     that cannot see its own input is told apart from one that already did its work,
+ *   - and the machinery that must stay - the compatibility script, the plugin's config
+ *     object and the floating selector markup - is counted per page against the cache,
+ *     so nothing that used to be there quietly went with the script.
+ */
+const translatorPattern = DEAD_AJAX_SCRIPTS.map((name) => new RegExp(`<script[^>]*${name.replace(/[.]/g, '\\.')}[^>]*>`, 'i'));
+const translatorPages = documents.filter((doc) => translatorPattern.some((pattern) => pattern.test(doc.text)));
+
+check(
+  'no page loads a script whose only working feature is a PHP endpoint',
+  translatorPages.length === 0,
+  `${translatorPages.length} page(s): ${translatorPages.slice(0, 2).map((doc) => doc.rel).join(', ')}`,
+);
+
+const scriptsLeft = documents.filter((doc) => removeDeadAjaxScripts(doc.text).count > 0);
+check(
+  'running that rule again over the output finds nothing left to remove',
+  scriptsLeft.length === 0,
+  `${scriptsLeft.length} page(s): ${scriptsLeft.slice(0, 2).map((doc) => doc.rel).join(', ')}`,
+);
+
+const countOf = (text, needle) => text.split(needle).length - 1;
+const survivals = [];
+
+for (const page of discover(paths.pageCache).filter((page) => !isOwnerRemoved(page.urlPath))) {
+  const doc = builtByPath.get(page.urlPath.endsWith('/') ? page.urlPath : `${page.urlPath}/`);
+  if (!doc) continue;
+
+  const source = readFileSync(page.file, 'utf8');
+  for (const kept of ['trp-frontend-compatibility', 'trp_data', 'trp-floater', 'trp-language']) {
+    if (countOf(source, kept) !== countOf(doc.text, kept)) survivals.push(`${page.urlPath} ${kept}: ${countOf(source, kept)} -> ${countOf(doc.text, kept)}`);
+  }
+}
+
+check(
+  'the language switcher and its config survived the removal untouched',
+  survivals.length === 0,
+  `${survivals.length} difference(s): ${survivals.slice(0, 3).join('; ')}`,
 );
 
 /* 8. the static search replaces the origin's AJAX one ------------------------- */

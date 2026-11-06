@@ -74,6 +74,7 @@ work/                       临时物：解包的 1 GB docroot、解压后的 SQ
 - 字体自托管后的三层一致性：页面不再叫 Google、保存下来的 CSS 所点名的 woff2 **必须在产物里**、CSS 内部不再含 `gstatic`（没跑 `npm run fonts` 时这三条降级为一条 info，不算失败）
 - 只能 AJAX 的组件：整块删的删到了、只删控件的挖不出东西了，且**每页产品卡片数与缓存页相等**（删控件不许带走内容）
 - `tel:` 链接全站只能有一个号码，且必须等于 `ENQUIRY_PHONE`
+- 只能 AJAX 的脚本：页面不加载它、重跑规则挖不出东西，且**语言切换相关四组计数逐页与缓存页相等**（防的是删的时候把旁边的切换器一并带走）
 - 双语结构齐备（根文档、`/en/`、sitemap、`_headers`、`404.html`）
 
 `404.html` 用首页自己的 header/footer 拼装（原站从未缓存 404 页），因此它不是复刻、是补作 —— 站点名从首页 `<title>` 后缀取，不硬编码。
@@ -100,9 +101,9 @@ Pages 项目的设置（Create project → Git → 选 `zzydhj/starbillions`）�
 
 `_headers`、`_redirects`、`sitemap.xml`、`404.html` 都在 `dist/` 里，Pages 会直接生效；深层页面的 `…/index.html` 会自动去后缀，所以链接写 `/product/xxx/` 形式即可。
 
-## 与原站不同的十二处（均为有意）
+## 与原站不同的十三处（均为有意）
 
-复刻之外，站主明确要求过、或原站自身写错而必须偏离的共十二处。它们全部集中在 `tools/lib/site-links.js` 与 `tools/ingest/wp/staticize.js`（偏好只写一份，构建器与门禁读同一处）：
+复刻之外，站主明确要求过、或原站自身写错而必须偏离的共十三处。它们全部集中在 `tools/lib/site-links.js` 与 `tools/ingest/wp/staticize.js`（偏好只写一份，构建器与门禁读同一处）：
 
 - **语言浮层**：原位置 `trp-bottom-right` 在手机上正好盖住底部菜单项，改为 `trp-top-right`。做法是换 TranslatePress 自己的位置类，不是写 CSS 覆盖 —— 插件的 `.trp-top-right` 规则在源码顺序上晚于 `:hover` 规则，同特异度下后来者赢，不需要 `!important`。
 - **询盘按钮**：产品页那 68 个（中英各 34）原本指向 `starbillions.cn` 的联系页（第三个域名），改为 `https://wa.me/8613714286517`。只按按钮可见文案匹配，所以改文案就会安全地不再命中；其余“联系我们”类链接一律未动。
@@ -164,3 +165,5 @@ Pages 项目的设置（Create project → Git → 选 `zzydhj/starbillions`）�
 一个删得对不对的判据：“热门”排行做不了也不做——`data/wp-products.json` 里没有销量、没有评分（只一个 `order` 排序字段），任何榜单都是我编的；而页签自己带的是 `taxonomies` 分类 ID 集合，是原站自定义的分组，不是排行。
 
 **12. 所有 `tel:` 链接改拨公司自己的号码。** 产品页联系行写着 `Phone: (86) 13714286517`，但 Woodmart 盖在整行上的隐形链接是 `<a class="wd-fill" href="tel: (064) 332-1233">`——主题演示的新西兰号码。手机上点那一行就拨到了国外：**可见文字是访客能核的那一半，href 是真正行动的那一半**。全站只有三个不同的 `tel:` 值（真的一个，占位符两种写法：带空格与 `%20`），所以“按位比对、不等于本站号码就改”是安全的（先量后写，不是推论）；共修 121 处。号码取自 `ENQUIRY_PHONE` 常量，与底部栏、WhatsApp 按钮同源。
+
+**13. 英文页不再加载 TranslatePress 的动态翻译脚本。** `trp-translate-dom-changes.js` 是个 MutationObserver，把页面加载后新出现的字符串 POST 给 `trp-ajax.php`，失败则回退 `admin-ajax.php`——两个在静态主机上都是 404，实实在在在每个英文页的控制台上留了 2–4 条错误。删它的依据是三个量，不是推测：症状范围与文件范围完全对齐（只有英文页加载它，也只有英文页报错）；它定义的唯一符号 `TRP_Translator` 全仓无任何其他引用；它的功能在这台主机上**一次也没成功过**——从未工作过的东西不会因为删反而变坏。只删标签，语言切换真正在用的 `trp-frontend-compatibility.js` 与 `trp_data` 一个字不改。标签有三种写法（WP Rocket 把它改成 `data-rocket-src`，本站引号两种都用），所以匹配的是整个标签且**要求标签体只能是空白**：内联 JSON 里提到这个文件名的地方不会被误删。另外补了一处基础设施级的认知：资产发现读的是**缓存页**而不是产物页（因为它要看 data 属性与 JSON 里的引用），所以删掉引用并不等于不拷文件——现在按同一张清单 `DEAD_AJAX_SCRIPTS` 剪掉，产物从 843 降到 842 个文件。

@@ -21,6 +21,7 @@ import {
   localizeCssAssetUrls,
   moveLanguageFloater,
   originSet,
+  removeDeadAjaxScripts,
   removeDeadAjaxWidgets,
   removeDeadShopControls,
   removeDeadTabsNavigation,
@@ -533,4 +534,33 @@ test('both passes are a no-op on a page that carries neither control', () => {
   assert.equal(removeDeadAjaxWidgets(plain).count, 0);
   assert.equal(removeDeadTabsNavigation(plain).html, plain);
   assert.equal(removeDeadTabsNavigation(plain).removed, 0);
+});
+
+test('removeDeadAjaxScripts drops the translator tag in every form the site prints it', () => {
+  // The first is the real bytes: WP Rocket replaced src with data-rocket-src and set a
+  // delay type. The second is the same file unloaded, the third single-quoted, because
+  // this site quotes attributes both ways and a rule that only knows one matches nothing.
+  const html = '<head>' +
+    '<script type="rocketlazyloadscript" data-rocket-type="text/javascript" data-rocket-src="/wp-content/plugins/translatepress-multilingual/assets/js/trp-translate-dom-changes.js?ver=2.6.9" id="trp-dynamic-translator-js" defer></script>' +
+    '<script src="/wp-content/plugins/translatepress-multilingual/assets/js/trp-translate-dom-changes.js?ver=2.6.9" id="trp-dynamic-translator-js"></script>' +
+    "<script data-rocket-src='/wp-content/plugins/translatepress-multilingual/assets/js/trp-translate-dom-changes.js'></script>" +
+    '<script src="/wp-content/plugins/translatepress-multilingual/assets/js/trp-frontend-compatibility.js?ver=2.6.9" id="trp-frontend-compatibility-js"></script>' +
+    '<script>var trp_data = {"trp_custom_ajax_url":"/wp-content/plugins/translatepress-multilingual/includes/trp-ajax.php"}; /* trp-translate-dom-changes.js reads this */</script>' +
+    '</head>';
+
+  const { html: out, count } = removeDeadAjaxScripts(html);
+
+  assert.equal(count, 3, 'all three spellings of the same file');
+  // Asserted on tags, not on the bare filename: the inline config block below mentions
+  // that name on purpose, and a "the string is gone" assertion would fail on the part
+  // that is supposed to stay.
+  assert.equal((out.match(/<script[^>]*trp-translate-dom-changes[^>]*>/g) || []).length, 0,
+    'no translator script tag is left, so nothing posts to a PHP endpoint at load');
+  assert.ok(out.includes('trp-frontend-compatibility'), 'the script the language switcher uses stays');
+  assert.ok(out.includes('trp_data'), 'and so does the config object it reads');
+  assert.ok(out.includes('/* trp-translate-dom-changes.js reads this */'), 'an inline block that merely names the file is not a script tag and must survive');
+
+  const again = removeDeadAjaxScripts(out);
+  assert.equal(again.count, 0, 'a second pass finds nothing, so the report cannot double');
+  assert.equal(again.html, out);
 });
