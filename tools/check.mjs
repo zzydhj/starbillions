@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, walk } from './lib/fs-utils.js';
 import { FLOATER_POSITIONS, ORIGIN_URLS, removeDeadShopControls, resolvesInOutput } from './ingest/wp/staticize.js';
-import { ENQUIRE_LABELS, MOBILE_TOOLBAR, replaceMobileToolbar } from './lib/site-links.js';
+import { COPYRIGHT_YEAR, ENQUIRE_LABELS, MENU_LABEL_LINKS, MOBILE_TOOLBAR, replaceMobileToolbar } from './lib/site-links.js';
 import { discover } from './mirror.mjs';
 
 /** The origin the mirror was built for, read from its own build report. */
@@ -360,6 +360,64 @@ check(
  */
 const demoHost = documents.filter((doc) => doc.text.includes('starbillions.savetime.work'));
 notes.push(`  info  ${demoHost.length} page(s) name the author's old preview host in their body text (2021 theme-demo posts), left as the source wrote it`);
+
+/* 7d. the footer's year and the menu items with a number for a URL ---------- */
+
+/**
+ * Two things the source baked into every page that have since become wrong.
+ *
+ * The copyright year is asserted in both directions: no page may still claim the old
+ * one, and at least one page must claim the new one. The second half is what makes
+ * the first meaningful - if the rule stopped matching because the footer's markup
+ * changed, "zero pages still say 2024" would be reported as a pass.
+ */
+const staleYear = documents.filter((doc) => /(©|&copy;)\s*2024/.test(doc.text));
+const currentYear = documents.filter((doc) => new RegExp(`(©|&copy;)\\s*${COPYRIGHT_YEAR}`).test(doc.text));
+
+check(
+  'the footer claims the current year',
+  staleYear.length === 0 && currentYear.length > 0,
+  `${staleYear.length} page(s) still say 2024, ${currentYear.length} say ${COPYRIGHT_YEAR}`,
+);
+
+/**
+ * Menu items whose URL field held a bare number. Those with a real page are routed to
+ * it; the group headings are not, because no single page answers for a size range and
+ * the theme has no separate submenu toggle - dropping their href would leave the group
+ * unreachable on a phone.
+ *
+ * Which bare-number hrefs may remain is therefore decided by the item's label, so the
+ * assertion is decided by the label too, against the build's own table: a heading the
+ * table knows must no longer carry a dead origin, a heading the table omits is counted
+ * and shown. Counting every `href="http://N"` instead would fail on the group headings
+ * the build deliberately leaves, which is a wrong predicate, not a wrong build.
+ */
+const NAV_ITEM = /<a\b[^>]*href="(https?:\/\/[^"\/]*)"[^>]*class="[^"]*woodmart-nav-link[^"]*"[^>]*>[\s\S]{0,900}?nav-link-text">([^<]*)</g;
+const knownLabels = new Set(Object.keys(MENU_LABEL_LINKS));
+const unrepaired = [];
+const unmapped = new Map();
+
+for (const doc of documents) {
+  for (const match of doc.text.matchAll(NAV_ITEM)) {
+    const host = match[1].split('//')[1];
+    if (host.includes('.')) continue; // a genuine external site
+
+    const label = match[2].replace(/&#0*38;/g, '&').replace(/&nbsp;/g, ' ').trim();
+    if (knownLabels.has(label)) unrepaired.push(`${doc.rel}: ${label} -> ${match[1]}`);
+    else unmapped.set(label || host, (unmapped.get(label || host) || 0) + 1);
+  }
+}
+
+check(
+  'every menu item the build knows a page for reaches that page',
+  unrepaired.length === 0,
+  unrepaired.length === 0
+    ? `${knownLabels.size} label(s) routed, none left dead`
+    : `${unrepaired.length} still dead: ${unrepaired.slice(0, 3).join('; ')}`,
+);
+
+const left = [...unmapped].sort((a, b) => b[1] - a[1]).map(([label, n]) => `${label}=${n}`).join(', ');
+notes.push(`  info  menu headings with no page to route to, left as authored: ${left || 'none'}`);
 
 /* 8. the static search replaces the origin's AJAX one ------------------------- */
 

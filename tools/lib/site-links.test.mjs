@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { MOBILE_TOOLBAR, replaceMobileToolbar, rewriteInquireButtons, whatsappUrlFor } from './site-links.js';
+import { COPYRIGHT_YEAR, MOBILE_TOOLBAR, repairMenuLinks, replaceMobileToolbar, rewriteInquireButtons, updateCopyrightYear, whatsappUrlFor } from './site-links.js';
 
 const URL = 'https://wa.me/8613714286517';
 const LABELS = ['Inquire about this product', '咨询此产品'];
@@ -129,4 +129,49 @@ test('replaceMobileToolbar ignores toolbars that hold no items and repeats nothi
   const twice = replaceMobileToolbar(once.html, MOBILE_TOOLBAR.en);
   assert.equal(twice.replaced, 1, 'rebuilding an already-built bar is stable, not additive');
   assert.equal(twice.html, once.html);
+});
+
+test('updateCopyrightYear moves the footer without touching dates that are not the footer', () => {
+  const html = '<p>© 2024 深圳市星百亿电子有限公司</p>'
+    + '<p>Copyright &copy; 2024 Starbillions. All rights reserved</p>'
+    + '<time datetime="2021-08-27">2021-08-27</time>'
+    + '<a href="/2021/08/27/some-post/">2021 的文章</a>';
+
+  const out = updateCopyrightYear(html);
+
+  assert.ok(out.includes(`© ${COPYRIGHT_YEAR}`));
+  assert.ok(out.includes(`&copy; ${COPYRIGHT_YEAR}`));
+  assert.match(out, /datetime="2021-08-27"/, 'a publication date is a fact about the post, not a copyright claim');
+  assert.match(out, /\/2021\/08\/27\//, 'URLs are not dates in this sense');
+  assert.equal(updateCopyrightYear(out), out, 'applying it twice changes nothing further');
+});
+
+test('repairMenuLinks routes the bare-number menu items that have a real page', () => {
+  const item = (href, label) => `<li id="menu-item-1" class="menu-item"><a href="${href}" class="woodmart-nav-link">` +
+    `<img src="/i.svg" /><span class="nav-link-text">${label}</span></a></li>`;
+  const html = item('http://3', '串口屏') + item('http://3', '转接板') + item('http://3', 'Serial screen');
+
+  const { html: out, repaired } = repairMenuLinks(html);
+
+  assert.equal(repaired, 3);
+  assert.match(out, /href="\/product-category\/串口屏\/"/);
+  assert.match(out, /href="\/product-category\/转接板\/"/);
+  assert.match(out, /href="\/en\/product-category\/串口屏\/"/, 'the English label lands on the English tree');
+  assert.ok(!out.includes('http://3'), 'no bare-number origin survives where a page is known');
+});
+
+test('repairMenuLinks leaves alone what it cannot map', () => {
+  const group = '<a href="http://1" class="woodmart-nav-link"><span class="nav-link-text">1.28-2.1英寸液晶显示屏</span></a>';
+  const entity = '<a href="http://1" class="woodmart-nav-link"><span class="nav-link-text">圆形&#038;长条形显示屏</span></a>';
+  const external = '<a href="https://twitter.com/starbillions" class="woodmart-nav-link"><span class="nav-link-text">Twitter</span></a>';
+  const bareHost = '<a href="http://example.com" class="woodmart-nav-link"><span class="nav-link-text">Example</span></a>';
+  const html = group + entity + external + bareHost;
+
+  const { html: out, repaired } = repairMenuLinks(html);
+
+  // A size range is a heading over several categories and 圆形&长条形显示屏 is a menu
+  // label with no page of its own; pointing either at one category would be an
+  // invented destination presented as a repair.
+  assert.equal(repaired, 0, 'nothing here has a destination the mirror can prove');
+  assert.equal(out, html);
 });

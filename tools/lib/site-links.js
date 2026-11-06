@@ -25,6 +25,82 @@ export const ENQUIRY_PHONE = '13714286517';
 export const ENQUIRE_LABELS = ['Inquire about this product', '咨询此产品'];
 
 /**
+ * The year the footer should claim.
+ *
+ * Hardcoded rather than computed at runtime, because a copyright range is a legal
+ * statement about the content, not the wall clock: a page printed in 2024 still
+ * asserts 2024, and a visitor's browser clock is not the authority on that. It is a
+ * constant here so that changing it is one edit that the build and the gate both
+ * read, instead of a string to hunt through 217 files.
+ */
+export const COPYRIGHT_YEAR = '2026';
+
+/**
+ * Move the footer's copyright year onto the current one.
+ *
+ * The source wrote `© 2024` in both footer variants on every page - 212 occurrences,
+ * and not one page carried any other year, so there is no range to preserve and no
+ * per-page decision to make.
+ *
+ * Only a year that directly follows the copyright sign is touched. Blog dates are
+ * plain text and 2021 post URLs live in hrefs; neither is preceded by ©, so neither
+ * can be caught by this rule.
+ */
+export function updateCopyrightYear(html, year = COPYRIGHT_YEAR) {
+  return html.replace(/(©|&copy;)\s*(?:19|20)\d\d/g, `$1 ${year}`);
+}
+
+/**
+ * Menu items whose WordPress URL was typed as a bare number.
+ *
+ * Several header entries were authored as `menu-item-type-custom` with the URL field
+ * holding a number, so WordPress prefixed `http://` and the browser resolves
+ * `http://3` to 0.0.0.3. The visible label is the only thing that says what was
+ * meant, which is why this is keyed by label: an entry whose label someone edits
+ * stops matching and stays as it was, rather than being pointed somewhere invented.
+ *
+ * Only labels with a page that really exists are listed. The size ranges
+ * ("1.28-2.1英寸液晶显示屏") and "热卖产品" are deliberately absent - they are group
+ * headings spanning several categories or a homepage section, and no single page
+ * answers for them, so routing them would be a guess dressed up as a fix.
+ */
+export const MENU_LABEL_LINKS = {
+  '串口屏': '/product-category/串口屏/',
+  '转接板': '/product-category/转接板/',
+  'Serial screen': '/en/product-category/串口屏/',
+  'adapter board': '/en/product-category/转接板/',
+};
+
+/**
+ * Give those menu items their real destination, matched on their own label.
+ *
+ * The anchor and its `<span class="nav-link-text">` are rewritten together: the
+ * dropdown markup puts the label after the href, so the pair has to be handled as one
+ * unit, and the label may carry `&#038;` entities that must be decoded before the
+ * comparison.
+ */
+export function repairMenuLinks(html, links = MENU_LABEL_LINKS) {
+  const dead = /<a\b[^>]*href="https?:\/\/[^"\/]*"[^>]*class="[^"]*woodmart-nav-link[^"]*"[^>]*>[\s\S]{0,900}?<\/a>/g;
+  let repaired = 0;
+
+  const output = html.replace(dead, (anchor) => {
+    // A URL that is a real host with a dot in it is somebody's genuine external link.
+    const href = /href="(https?:\/\/[^"\/]*)\/?"/.exec(anchor)?.[1];
+    if (!href || /\./.test(href.split('//')[1])) return anchor;
+
+    const raw = /nav-link-text">([^<]*)</.exec(anchor)?.[1] ?? '';
+    const label = raw.replace(/&#0*38;/g, '&').replace(/&nbsp;/g, ' ').trim();
+    const target = links[label];
+    if (!target) return anchor;
+
+    repaired += 1;
+    return anchor.replace(/href="[^"]*"/, `href="${target}"`);
+  });
+
+  return { html: output, repaired };
+}
+
+/**
  * Hand the search box over to the static implementation.
  *
  * Two things happen here and both are needed. The theme's own autocomplete is keyed off

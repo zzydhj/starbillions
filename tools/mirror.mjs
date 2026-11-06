@@ -40,7 +40,7 @@ import { dirname, join } from 'node:path';
 import { dirname as posixDirname, join as posixJoin, resolve as posixResolve } from 'node:path/posix';
 import { paths } from './lib/paths.js';
 import { exists, removeTree } from './lib/fs-utils.js';
-import { ENQUIRE_LABELS, ENQUIRY_PHONE, MOBILE_TOOLBAR, enableStaticSearch, replaceMobileToolbar, rewriteInquireButtons, whatsappUrlFor } from './lib/site-links.js';
+import { ENQUIRE_LABELS, ENQUIRY_PHONE, MOBILE_TOOLBAR, enableStaticSearch, replaceMobileToolbar, repairMenuLinks, rewriteInquireButtons, updateCopyrightYear, whatsappUrlFor } from './lib/site-links.js';
 import { buildSearchIndex } from './ingest/wp/search-index.js';
 import {
   fileReferencesIn,
@@ -238,7 +238,7 @@ export async function build({ quiet = false } = {}) {
   let written = 0;
   let copied = 0;
   let homeHtml = '';
-  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0 };
+  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, copyrightYears: 0 };
   // Inputs for the search index, gathered while writing rather than re-read from disk:
   // the index must describe the pages that were actually shipped, not the cache files
   // they came from.
@@ -302,8 +302,14 @@ export async function build({ quiet = false } = {}) {
     // is not this site. Rebuilt with entries that resolve, per language.
     const bar = replaceMobileToolbar(cleaned.html, page.urlPath.startsWith('/en/') ? MOBILE_TOOLBAR.en : MOBILE_TOOLBAR.zh);
 
+    // Two stale facts the source baked into every page: a copyright year that has
+    // since passed, and menu items whose URL field was filled with a bare number.
+    const dated = updateCopyrightYear(bar.html);
+    const linked = repairMenuLinks(dated);
+    if (dated !== bar.html) stats.copyrightYears += 1;
+
     // The origin's search box queried PHP; this points it at a local index instead.
-    const search = enableStaticSearch(bar.html);
+    const search = enableStaticSearch(linked.html);
 
     stats.rewritten += out.rewritten;
     stats.dropped += out.dropped;
@@ -316,6 +322,7 @@ export async function build({ quiet = false } = {}) {
     stats.searchWired += search.wired ? 1 : 0;
     stats.shopControls += Object.values(cleaned.removed).reduce((sum, n) => sum + n, 0);
     stats.mobileBars += bar.replaced;
+    stats.menuLinks += linked.repaired;
     stats.cards += cardsBefore;
 
     if (/^\/product\//.test(page.urlPath) || /^\/en\/product\//.test(page.urlPath)) {
@@ -363,6 +370,7 @@ export async function build({ quiet = false } = {}) {
   console.log(`  enquiry        ${stats.inquireLinks} buttons -> ${whatsapp || '(left as they were)'}`);
   console.log(`  shop toolbar   ${stats.shopControls} dead control(s) removed, ${stats.cards} product cards kept`);
   console.log(`  mobile bar     ${stats.mobileBars} bar(s) rebuilt from the owner's entries`);
+  console.log(`  stale bits     ${stats.copyrightYears} page(s) re-dated, ${stats.menuLinks} menu link(s) repaired`);
   console.log(`  search         ${index.length} entries (${index.filter((e) => e.lang === 'en').length} en), ${stats.searchWired} pages wired`);
   console.log(`  uncached links ${unknownPages.size} targets the mirror links to but never rendered`);
   console.log(`  in             ${((Date.now() - started) / 1000).toFixed(1)} s\n`);
