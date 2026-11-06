@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { COPYRIGHT_YEAR, EN_PAGE_TITLES, MOBILE_TOOLBAR, localizeGoogleFonts, normalizeFontUrl, replaceContactForm, replaceMapWithAddress, repairMenuLinks, replaceMobileToolbar, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './site-links.js';
+import { COPYRIGHT_YEAR, EN_PAGE_TITLES, MOBILE_TOOLBAR, googleFontStylesheetUrls, localizeGoogleFonts, normalizeFontUrl, replaceContactForm, replaceMapWithAddress, repairMenuLinks, replaceMobileToolbar, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './site-links.js';
 
 const URL = 'https://wa.me/8613714286517';
 const LABELS = ['Inquire about this product', '咨询此产品'];
@@ -265,6 +265,31 @@ test('normalizeFontUrl is the one rule both the fetcher and the rewriter use', (
   assert.equal(normalizeFontUrl(raw), 'https://fonts.googleapis.com/css?family=Hind%3A400%2C600%7COpen+Sans%3A400');
   assert.equal(normalizeFontUrl('https://fonts.googleapis.com/css?family=Roboto&ver=1'), 'https://fonts.googleapis.com/css?family=Roboto');
   assert.equal(normalizeFontUrl('https://fonts.googleapis.com/css?family=Roboto'), 'https://fonts.googleapis.com/css?family=Roboto');
+
+  // Only the cache buster may go. An earlier version cut at the first ampersand, which
+  // also dropped display=swap, so the saved CSS described a different font behaviour
+  // from the one the site asks for while still looking like a clean key.
+  assert.equal(
+    normalizeFontUrl('https://fonts.googleapis.com/css?family=Roboto%3A400&#038;display=swap&#038;ver=6.5.2'),
+    'https://fonts.googleapis.com/css?family=Roboto%3A400&display=swap',
+  );
+});
+
+test('googleFontStylesheetUrls sees the quoting the source uses and skips host hints', () => {
+  // These are the forms the site actually prints: single-quoted attributes, a
+  // entity-escaped ampersand, and a dns-prefetch naming the bare host.
+  const html = [
+    "<link rel='dns-prefetch' href='//fonts.googleapis.com' />",
+    "<link rel='stylesheet' id='xts-google-fonts-css' href='https://fonts.googleapis.com/css?family=Hind%3A400&#038;ver=7.3.3' type='text/css' media='all' />",
+    "<link rel='stylesheet' href='https://fonts.googleapis.com/css?family=Hind%3A400&#038;ver=9.0.0' />",
+    "<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin />",
+  ].join('');
+
+  assert.deepEqual(
+    googleFontStylesheetUrls(html),
+    ['https://fonts.googleapis.com/css?family=Hind%3A400'],
+    'two ver values collapse to one stylesheet, and hints are not stylesheets',
+  );
 });
 
 test('localizeGoogleFonts rewrites only what the manifest actually names', () => {

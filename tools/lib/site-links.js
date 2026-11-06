@@ -328,16 +328,41 @@ export function replaceMapWithAddress(html) {
 }
 
 /**
+ * A Google Fonts stylesheet reference, in the shape the source really writes.
+ *
+ * Matched on the URL and not on `href="..."`, because this site's markup quotes these
+ * tags with single quotes - `href='https://fonts.googleapis.com/css?...'` - and a rule
+ * aimed at the other form reads perfectly while matching nothing: the build reported
+ * "0 links local, 0 missing", which looks like nothing to do rather than like a rule
+ * that cannot see its own input. `/css` in the pattern is what keeps the
+ * `<link rel='dns-prefetch' href='//fonts.googleapis.com'>` hints out of the list; they
+ * name a host, not a stylesheet, and there is nothing local to point them at.
+ */
+export const GOOGLE_FONT_STYLESHEET = /https?:\/\/fonts\.googleapis\.com\/css[^'"<>\s]*/g;
+
+/** The distinct stylesheets a page asks Google for, already in manifest key form. */
+export function googleFontStylesheetUrls(html) {
+  return [...new Set((html.match(GOOGLE_FONT_STYLESHEET) || []).map(normalizeFontUrl))];
+}
+
+/**
  * The form of a Google Fonts URL that identifies the stylesheet.
  *
  * WordPress appends `&#038;ver=7.3.3` - an entity-escaped ampersand plus a cache
- * buster - and Google answers the same CSS regardless. Both the fetcher's manifest
- * keys and the rewriter's lookups go through here, because two independent ideas of
- * "the same URL" is how a manifest silently never matches and the page keeps calling
- * Google with no error anywhere to show it.
+ * buster - and Google answers the same CSS without it. Only `ver` is dropped: an
+ * earlier version cut the URL at the first ampersand, which also threw away
+ * `display=swap`, so the saved CSS would have differed from what the site asks for.
+ * Both the fetcher's manifest keys and the rewriter's lookups go through here,
+ * because two independent ideas of "the same URL" is how a manifest silently never
+ * matches and the page keeps calling Google with no error anywhere to show it.
  */
 export function normalizeFontUrl(raw) {
-  return String(raw).split(/&#0*38;|&amp;/)[0].replace(/[?&]ver=[^&"]*/, '').replace(/[?&]$/, '');
+  const text = String(raw).replace(/&#0*38;|&amp;/g, '&');
+  const at = text.indexOf('?');
+  if (at === -1) return text;
+
+  const kept = text.slice(at + 1).split('&').filter((pair) => pair !== '' && !pair.startsWith('ver='));
+  return kept.length > 0 ? `${text.slice(0, at)}?${kept.join('&')}` : text.slice(0, at);
 }
 
 /**
@@ -354,18 +379,18 @@ export function localizeGoogleFonts(html, manifest) {
   let replaced = 0;
   let missing = 0;
 
-  const output = html.replace(/<link[^>]*href="(https:\/\/fonts\.googleapis\.com[^"]*)"[^>]*>/gi, (tag, raw) => {
-    const local = manifest[normalizeFontUrl(raw)];
+  const output = html.replace(GOOGLE_FONT_STYLESHEET, (rawUrl) => {
+    const local = manifest[normalizeFontUrl(rawUrl)];
     if (!local) {
       missing += 1;
-      return tag;
+      return rawUrl;
     }
 
     replaced += 1;
-    // The original tag also carries preconnect hints and a ver parameter; neither
-    // means anything for a same-origin file, and leaving a stale integrity-free
-    // crossorigin attribute on a local stylesheet is how a CSP later bites.
-    return tag.replace(/href="[^"]*"/, `href="${local}"`);
+    // Only the URL text changes, so whatever else the source put in the tag - type,
+    // media, its own quoting - is kept as written. This is a pointer edit, not a
+    // rewrite of the markup.
+    return local;
   });
 
   // The gstatic preconnect is only useful while gstatic is still being contacted.

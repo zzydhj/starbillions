@@ -71,6 +71,7 @@ work/                       临时物：解包的 1 GB docroot、解压后的 SQ
 - 拷贝出去的 CSS 内部不含旧域名，也不含站主另一个域（`starbillions.cn`）的地址 —— 后者现在全部指向本站副本，而且被指到的文件**必须在产物里**
 - 每个已拷脚本按名字要的分块都真的在产物里（`ChunkLoadError` 的唯一可行前置检查，因为它只在浏览器控制台里出现）
 - 删掉的演示内容：无文件、无链接、无空菜单项，且留下的主菜单仍是四项
+- 字体自托管后的三层一致性：页面不再叫 Google、保存下来的 CSS 所点名的 woff2 **必须在产物里**、CSS 内部不再含 `gstatic`（没跑 `npm run fonts` 时这三条降级为一条 info，不算失败）
 - 双语结构齐备（根文档、`/en/`、sitemap、`_headers`、`404.html`）
 
 `404.html` 用首页自己的 header/footer 拼装（原站从未缓存 404 页），因此它不是复刻、是补作 —— 站点名从首页 `<title>` 后缀取，不硬编码。
@@ -97,9 +98,9 @@ Pages 项目的设置（Create project → Git → 选 `zzydhj/starbillions`）�
 
 `_headers`、`_redirects`、`sitemap.xml`、`404.html` 都在 `dist/` 里，Pages 会直接生效；深层页面的 `…/index.html` 会自动去后缀，所以链接写 `/product/xxx/` 形式即可。
 
-## 与原站不同的九处（均为有意）
+## 与原站不同的十处（均为有意）
 
-复刻之外，站主明确要求过、或原站自身写错而必须偏离的共九处。它们全部集中在 `tools/lib/site-links.js` 与 `tools/ingest/wp/staticize.js`（偏好只写一份，构建器与门禁读同一处）：
+复刻之外，站主明确要求过、或原站自身写错而必须偏离的共十处。它们全部集中在 `tools/lib/site-links.js` 与 `tools/ingest/wp/staticize.js`（偏好只写一份，构建器与门禁读同一处）：
 
 - **语言浮层**：原位置 `trp-bottom-right` 在手机上正好盖住底部菜单项，改为 `trp-top-right`。做法是换 TranslatePress 自己的位置类，不是写 CSS 覆盖 —— 插件的 `.trp-top-right` 规则在源码顺序上晚于 `:hover` 规则，同特异度下后来者赢，不需要 `!important`。
 - **询盘按钮**：产品页那 68 个（中英各 34）原本指向 `starbillions.cn` 的联系页（第三个域名），改为 `https://wa.me/8613714286517`。只按按钮可见文案匹配，所以改文案就会安全地不再命中；其余“联系我们”类链接一律未动。
@@ -147,3 +148,9 @@ Pages 项目的设置（Create project → Git → 选 `zzydhj/starbillions`）�
 机制上只有一张清单（`staticize.js` 的 `OWNER_REMOVED_SECTIONS` + `isOwnerRemoved`），它**同时**决定“不构建哪些页”和“`isExcluded` 摘掉哪些链接”，所以两半不可能不一致；页头的 博客 / Portfolio 两个菜单项由 `removeOwnerMenuItems` 在 URL 改写**之前**整块 `li` 摘掉（在那之后 href 已没了，认不出来），带死链的子树一起走、自己链接还活着的父项只摘死子项。产物：137 页（原 217）、754 个文件、190 MB，菜单剩 4 项（首页 / 产品中心 / 关于我们 / 联系我们），门禁断言“无文件、无链接、无空标签、留下的菜单确实是这四个”。
 
 一个必须记住的坑：文章 URL 的真实形态是 `/2021/08/26/slug/`（固定链接是 `/%year%/%monthnum%/%day%/%postname%/`，缓存目录层级就是证据），而我第一版规则写成了 `/2021-08-26/slug/`。**控制台与编辑器会把这两种写法渲染成同一串**，所以代码看着对、测试也绿（测试数据是我按同一个误解写的），却一页都没删掉。判定路径形态要用 `split('/')` 看分段，不要看打印出来的字符串。
+
+**10. 字体自托管，不再是 Google 提供。** `npm run fonts`（需联网，仅这一条命令联网）从**已构建的页面**里枚举真正被引用的 Google Fonts CSS，把每个 `@font-face` 的 woff2 下到 `public/fonts/`，名字按 URL 的 sha1 取（Google 的 basename 是短哈希，去掉目录后不同家族会碰名），并写 `manifest.json`。`npm run mirror` 按表把页面上的 URL 改成本站 `/fonts/…css`；**没表就一个字不改**，所以镜像本身仍是可离线重现的。改的是指针而不是标签：只替掉 URL 文本，`type`/`media` 和原站的引号形状全部保留。
+
+两个细节都是实测踩出来的坑：（a）这些 `<link>` 在本站标记里用的是**单引号**（`href='https://…'`），而第一版规则要求 `href="…"`，于是一句也没命中，构建却报“0 local, 0 missing”——这看上去像“没东西可做”，而不是“规则看不见自己的输入”；现在取 URL 本身去匹配，不取属性形式。（b）`normalizeFontUrl` 只剔掉 `ver=` 缓存串；早期版本在第一个 `&#038;` 处截断，会连带丢掉 `display=swap`，保存下来的 CSS 就不是站点要的那份。抓取器与重写器共用同一个 finder（`googleFontStylesheetUrls`）和同一个归一化函数，不然清单键对不上就是静默不生效。
+
+产物实测：3 个 CSS + 68 个 woff2（共 1.8 MB），405 个页面链接已本地化，首页与产品页指向两个 Google 域的请求为 0，页面真正在用的 Hind `document.fonts.check` 为 true。注意 **Hind 本身不含 CJK 子集**（Google 也不提供），所以中文一直回落系统字体 —— 自托管不改变这一点，也不是缺陷。

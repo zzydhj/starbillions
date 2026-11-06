@@ -504,6 +504,33 @@ if (fontManifest) {
     unresolved.length === 0,
     `${unresolved.length} page(s) still call Google despite the manifest: ${unresolved.slice(0, 2).map((doc) => doc.rel).join(', ')}`,
   );
+
+  /**
+   * And the saved stylesheets must be self-contained: they were written by rewriting
+   * Google's own url() values, so a font file that was named but not downloaded is a
+   * glyph that silently falls back - the same class of half-done state as shipping the
+   * manifest while still calling Google, and it is only visible on one browser.
+   */
+  const savedSheets = [...known].filter((rel) => rel.startsWith('fonts/') && rel.endsWith('.css'));
+  const faceFiles = new Set();
+  const stillRemote = [];
+
+  for (const rel of savedSheets) {
+    const text = readFileSync(join(paths.dist, rel), 'utf8');
+    if (/fonts\.(gstatic|googleapis)\.com/.test(text)) stillRemote.push(rel);
+    for (const match of text.matchAll(/url\(['"]?\/fonts\/([^'")\s]+)/g)) faceFiles.add(`fonts/${match[1]}`);
+  }
+
+  check(
+    'the saved font stylesheets name font files that are in the output',
+    savedSheets.length > 0 && faceFiles.size > 0 && [...faceFiles].every((rel) => known.has(rel)),
+    `${savedSheets.length} stylesheet(s), ${faceFiles.size} font file(s), ${[...faceFiles].filter((rel) => !known.has(rel)).length} without a file`,
+  );
+  check(
+    'no saved font stylesheet still points at Google',
+    stillRemote.length === 0,
+    `${stillRemote.length} file(s): ${stillRemote.slice(0, 2).join(', ')}`,
+  );
 } else {
   notes.push(`  info  fonts still load from Google on ${remoteFonts.length} page(s) - npm run fonts has not been run`);
 }

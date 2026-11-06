@@ -21,14 +21,20 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { paths } from './lib/paths.js';
-import { normalizeFontUrl } from './lib/site-links.js';
+import { googleFontStylesheetUrls } from './lib/site-links.js';
 
 /** A browser UA, because Google serves ttf to agents that do not advertise woff2. */
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 
 const outDir = join(paths.public, 'fonts');
 
-/** Every distinct Google Fonts stylesheet URL the built pages reference. */
+/**
+ * Every distinct Google Fonts stylesheet URL the built pages ask for.
+ *
+ * The finder is the one the rewriter uses, on purpose: if this list were built by its
+ * own pattern, a difference in quoting or parameter order would produce manifest keys
+ * the build never looks up, and the site would keep calling Google quietly.
+ */
 function collectUrls() {
   const found = new Set();
 
@@ -41,9 +47,7 @@ function collectUrls() {
       }
       if (!entry.endsWith('.html')) continue;
 
-      for (const match of readFileSync(abs, 'utf8').matchAll(/href="(https:\/\/fonts\.googleapis\.com\/[^"]*)"/g)) {
-        found.add(normalizeFontUrl(match[1]));
-      }
+      for (const url of googleFontStylesheetUrls(readFileSync(abs, 'utf8'))) found.add(url);
     }
   })(paths.dist);
 

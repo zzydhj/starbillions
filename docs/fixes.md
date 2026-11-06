@@ -55,12 +55,12 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 
 | 引用位置 | 域名 | 问题 |
 | --- | --- | --- |
-| 3 个 `<link>` 字体 | `fonts.googleapis.com` / `fonts.gstatic.com` | 中国大陆无法访问，字体退化到 Arial |
+| ~~3 个 `<link>` 字体~~ | `fonts.googleapis.com` / `fonts.gstatic.com` | **已于 2026-11-06 自托管**（`npm run fonts`）。浏览器实测：首页与产品页指向两个 Google 域的请求均为 **0**，3 个 CSS 与 68 个 woff2 全部本站 200，页面真正在用的 Hind 已 `status: loaded`。未跑该命令时构建保留原链接（镜像不联网）。注：**Hind 不含 CJK 子集**（Google 本来也没提），中文在改造前后都回落到系统字体，不是本次引入的问题 |
 | 首页地图 `<iframe>` | `maps.google.com` | 大陆打不开，该区域空白 |
 | ~~首页 Elementor 横幅背景图~~ | `starbillions.cn/wp-content/uploads/2023/11/10001*` | **已于 2026-11-06 修好**（`localizeCssAssetUrls`）。本文早前说“该文件在本备份里不存在”是错的（错因见下）：四个文件（`10001.jpg` 92 KB、`10001.png` 29 KB、`10001-1.png` 29 KB、`10001-2.jpg` 19 KB）都在 `wp-content/uploads/2023/11/` 里，**相对路径完全相同**，所以这不是换图，是把指针从证书无效的旧域收回本站。4 个 Elementor 生成的 CSS 被重写，拷进产物的是重写后的文本而不是原件 |
 | ~~手机端底部工具栏~~ | `starbillions.savetime.work` | **已于 2026-11-06 在构建期重写**（`tools/lib/site-links.js` 的 `replaceMobileToolbar`）：3 项改为 电话 `tel:+8613714286517` / 产品中心 `/产品中心/` / 联系我们 `/联系我们/`，英文页对应 Call / Products / Contact。第 2、3 项原本图标容器为空（齿轮是 `.wd-toolbar-link .wd-tools-icon:before{content:"\f140"}` 在空容器上的默认字形），**图标现为内联 SVG + `fill="currentColor"`**（不是 `public/icons/` 里的文件，那两个已删——文件内部烤进去的颜色 CSS 无法调与）。原数据来自 Woodmart 主题选项“Bottom toolbar”，不是镜像造成 |
 
-**建议**：字体改为自托管（已提供 `npm run fonts`，本地无字体文件，必须下载）、地图已换为文字地址。旧域两处残留已分别处理：底部栏重写、横幅背景图指向本地副本（见上）。
+**建议**：地图已换为文字地址；字体自托管脚本已跑过并已提交产物（重跑只会拉新字体）。旧域两处残留已分别处理：底部栏重写、横幅背景图指向本地副本（见上）。
 
 ---
 
