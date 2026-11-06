@@ -94,11 +94,27 @@ Pages 项目的设置（Create project → Git → 选 `zzydhj/starbillions`）�
 
 `_headers`、`_redirects`、`sitemap.xml`、`404.html` 都在 `dist/` 里，Pages 会直接生效；深层页面的 `…/index.html` 会自动去后缀，所以链接写 `/product/xxx/` 形式即可。
 
-## 与原站不同的两处（均为有意）
+## 与原站不同的三处（均为有意）
 
-复刻之外，站主明确要求过两个偏离，都集中在 `tools/lib/site-links.js`（偏好只写一份，构建器与门禁读同一处）：
+复刻之外，站主明确要求过三个偏离。前两个集中在 `tools/lib/site-links.js`（偏好只写一份，构建器与门禁读同一处）：
 
 - **语言浮层**：原位置 `trp-bottom-right` 在手机上正好盖住底部菜单项，改为 `trp-top-right`。做法是换 TranslatePress 自己的位置类，不是写 CSS 覆盖 —— 插件的 `.trp-top-right` 规则在源码顺序上晚于 `:hover` 规则，同特异度下后来者赢，不需要 `!important`。
 - **询盘按钮**：产品页那 68 个（中英各 34）原本指向 `starbillions.cn` 的联系页（第三个域名），改为 `https://wa.me/8613714286517`。只按按钮可见文案匹配，所以改文案就会安全地不再命中；其余“联系我们”类链接一律未动。
 
 这两条在 `npm run check` 里有对应断言，且**源计数为 0 直接算失败**，免得重建把它们弄丢后门禁反而绿灯。
+
+**3. 产品搜索改为纯静态。** 原站搜索是 Woodmart 的 AJAX 自动完成，POST 到 `/wp-admin/admin-ajax.php?action=woodmart_ajax_search`；静态主机没有 PHP，所以它只会转圈。回车则提交 `GET /?s=关键词`，Pages 把 `/` 解成首页文件、丢弃查询串，于是访客回到自己刚出发的地方。
+
+现在：构建时从**已发布的产品页**生成 `dist/search.json`（68 条 = 34 产品 × 双语），`public/site-search.js` 在浏览器本地匹配，结果填进主题原有的下拉结构（`.autocomplete-suggestions` 等类名原样复用，所以样式是主题的）。不依赖 jQuery，不请求任何服务端。
+
+索引为什么从渲染页抽而不是从 `data/wp-products.json` 抽：后者来自 SQL，`sku` 与 `price` 是空的（原站开了 YITH 目录模式），而页面上的**规格表**（分辨率、接口、尺寸、型号）才是买家真正会搜的东西。另外两项回灌必不可少：
+
+- **分类归档页标题** —— 中文术语名（串口屏、转接板）只出现在分类页上，产品页里一个都没有
+- **mega menu 分组标签** —— “圆形&长条形显示屏”不是术语名，只是菜单标签，不抽它就搜不到
+
+搜索范围只含产品（与原站 `data-post_type="product"` 一致）。打分权重把标题排在规格之上，因为本站有个已知数据缺陷：所有产品页的“产品尺寸”恒为 `2.1"TFT round display`，裸搜 `2.1` 会命中全部 68 条。
+
+两个实现约束，都是实测踩出来的，改代码前请先读：
+
+- `public/site-search.js` **不得 import 任何东西**。它被浏览器当模块加载，`import '../tools/...'` 是仓库路径不是 URL，会 404 导致整个模块不执行——单测全绿而线上功能为 0%。`npm run check` 已断言这一点。
+- `wd-opened` 必须加在 `.wd-dropdown-results` **元素自身**，主题的规则是 `.wd-dropdown.wd-opened{visibility:visible;opacity:1}`；只加在 form 上会匹配不上，结果进了 DOM 但屏幕上看不见。

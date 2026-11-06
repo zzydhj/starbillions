@@ -40,7 +40,8 @@ import { dirname, join } from 'node:path';
 import { dirname as posixDirname, join as posixJoin, resolve as posixResolve } from 'node:path/posix';
 import { paths } from './lib/paths.js';
 import { exists, removeTree } from './lib/fs-utils.js';
-import { ENQUIRE_LABELS, ENQUIRY_PHONE, rewriteInquireButtons, whatsappUrlFor } from './lib/site-links.js';
+import { ENQUIRE_LABELS, ENQUIRY_PHONE, enableStaticSearch, rewriteInquireButtons, whatsappUrlFor } from './lib/site-links.js';
+import { buildSearchIndex } from './ingest/wp/search-index.js';
 import {
   fileReferencesIn,
   internalUrl,
@@ -236,7 +237,12 @@ export async function build({ quiet = false } = {}) {
   let written = 0;
   let copied = 0;
   let homeHtml = '';
-  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0 };
+  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0 };
+  // Inputs for the search index, gathered while writing rather than re-read from disk:
+  // the index must describe the pages that were actually shipped, not the cache files
+  // they came from.
+  const productPages = [];
+  const categoryPages = [];
 
   for (const page of pages) {
     const text = readFileSync(page.file, 'utf8');
@@ -274,16 +280,27 @@ export async function build({ quiet = false } = {}) {
     // go to WhatsApp instead of a contact page on a third domain.
     const edited = rewriteInquireButtons(positioned, whatsapp, ENQUIRE_LABELS);
 
+    // The origin's search box queried PHP; this points it at a local index instead.
+    const search = enableStaticSearch(edited);
+
     stats.rewritten += out.rewritten;
     stats.dropped += out.dropped;
 
     const target = join(paths.dist, page.outPath);
     await mkdir(dirname(target), { recursive: true });
-    await writeFileAsync(target, edited, 'utf8');
+    await writeFileAsync(target, search.html, 'utf8');
     written += 1;
-    stats.inquireLinks += occurrences(edited, whatsapp) - occurrences(positioned, whatsapp);
+    stats.inquireLinks += occurrences(search.html, whatsapp) - occurrences(positioned, whatsapp);
+    stats.searchWired += search.wired ? 1 : 0;
 
-    if (page.urlPath === '/') homeHtml = edited;
+    if (/^\/product\//.test(page.urlPath) || /^\/en\/product\//.test(page.urlPath)) {
+      productPages.push({ html: search.html, urlPath: page.urlPath, lang: page.urlPath.startsWith('/en/') ? 'en' : 'zh' });
+    }
+    if (/product-category\//.test(page.urlPath)) {
+      categoryPages.push({ html: search.html, urlPath: page.urlPath });
+    }
+
+    if (page.urlPath === '/') homeHtml = search.html;
   }
 
   // WordPress never cached a 404 response, so the mirror has none. Cloudflare Pages
@@ -305,6 +322,12 @@ export async function build({ quiet = false } = {}) {
 
   copyPublicExtras();
 
+  // The index the browser searches. Built from the shipped pages so a product that is
+  // missing from the mirror is missing from search too, rather than being offered as a
+  // result that 404s.
+  const index = buildSearchIndex(productPages, categoryPages, homeHtml);
+  await writeFileAsync(join(paths.dist, 'search.json'), JSON.stringify(index), 'utf8');
+
   console.log('\n  mirror written\n');
   console.log(`  pages          ${written}`);
   console.log(`  assets         ${copied} copied, ${missingFiles.size} referenced but absent`);
@@ -313,6 +336,7 @@ export async function build({ quiet = false } = {}) {
   console.log(`  sitemap        ${sitemap.split('<url>').length - 1} urls -> ${siteOrigin}`);
   console.log(`  lang switcher  floating button moved to ${floaterPosition}`);
   console.log(`  enquiry        ${stats.inquireLinks} buttons -> ${whatsapp || '(left as they were)'}`);
+  console.log(`  search         ${index.length} entries (${index.filter((e) => e.lang === 'en').length} en), ${stats.searchWired} pages wired`);
   console.log(`  uncached links ${unknownPages.size} targets the mirror links to but never rendered`);
   console.log(`  in             ${((Date.now() - started) / 1000).toFixed(1)} s\n`);
 
@@ -355,8 +379,10 @@ function safeDecode(text) {
  * Measured on the built home page: exactly one <header> and one <footer> element
  * each, so the boundaries are unambiguous. The head is reused so the theme CSS and
  * fonts load identically, with its canonical removed - a 404 must not claim to be
- * the home page. Scripts are left out: they exist to run cart and filter behaviour
- * this page has none of.
+ * the home page. The theme's scripts are left out: they exist to run cart and filter
+ * behaviour this page has none of. The one script kept is the static search, because
+ * the reused header carries a search box, and the only page on the site where typing in
+ * it does nothing would be the page that tells people the site has no search.
  */
 function build404(homeHtml) {
   if (homeHtml === '') {
@@ -380,7 +406,9 @@ function build404(homeHtml) {
       <a class="btn" href="/">返回首页 / Back to home</a>
     </div>`;
 
-  return `<!DOCTYPE html><html lang="zh-CN"><head>${head}</head>${body}${header}<main>${notice}</main>${footer}</body></html>\n`;
+  const search = /<script[^>]*src="\/site-search\.js"[^>]*><\/script>/i.exec(homeHtml)?.[0] ?? '';
+
+  return `<!DOCTYPE html><html lang="zh-CN"><head>${head}</head>${body}${header}<main>${notice}</main>${footer}${search}</body></html>\n`;
 }
 
 /**
@@ -424,9 +452,12 @@ function buildSitemap(pages, origin) {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${body}\n</urlset>\n`;
 }
 
-/** Pages-root files that are authored, not generated: _headers, _redirects, robots. */
+/**
+ * Authored files that belong at the site root rather than inside the copied tree:
+ * the Pages directives, the favicon, robots, and the static search runtime.
+ */
 function copyPublicExtras() {
-  for (const name of ['_headers', '_redirects', 'favicon.svg', 'robots.txt']) {
+  for (const name of ['_headers', '_redirects', 'favicon.svg', 'robots.txt', 'site-search.js', 'site-search.css']) {
     const from = join(paths.public, name);
     if (exists(from)) copyFileSync(from, join(paths.dist, name));
   }

@@ -58,7 +58,24 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 
 **建议**：字体改为自托管（备份里 `wp-content/uploads/` 有 google-fonts 缓存目录可考虑启用）、地图换高德/百度静态图或直接删掉 iframe、两处残留域名替换为正式域名。
 
-底部工具栏那一行补一句：正确的修法是在 WordPress 后台主题选项里改标签与链接（改成电话 / WhatsApp / 联系我们），因为在镜像里改会在下次重建时被洗掉。站主 2026-11-05 选择暂不动它，只先处理了产品页询盘按钮（见 README“与原站不同的两处”）。
+---
+
+### 动态功能在静态站上的现状（2026-11-06 实测）
+
+原站是 WordPress，下面这些功能依赖 PHP。它们的**外观**都在，行为各不相同：
+
+| 功能 | 机制 | 现状 |
+| --- | --- | --- |
+| 产品搜索 | `admin-ajax.php?action=woodmart_ajax_search` | **已重建为纯静态**：`dist/search.json` + `public/site-search.js`，本地匹配，实测可用（见 README） |
+| 首页“热门产品分类”4 个页签 | `admin-ajax.php?action=woodmart_get_products_tab_shortcode` | **仍坏**：HTML 里只预渲染了当前页签（实测 `wd-tab-content-wrapper=1`、面板=1，而页签有 4 个），点其余 3 个只看到转圈后空白 |
+| 分类页价格筛选 | `?min_price=&max_price=` + AJAX | **仍坏**：9 处控件，筛选结果需要服务端查询 |
+| 加载更多 / 产品轮播分页 | `woodmart_get_products_*` | **仍坏** |
+| 联系表单（metform） | `POST /wp-json/metform/v1/entries/insert/16312` | **仍坏，且最严重**：客户填完点提交什么都不会发生，也不报错 |
+| 加入购物车 / 收藏 / 对比 | `?wc-ajax=`、`admin-ajax.php` | 按站主决定主动去除（仅界面，无后端） |
+
+页签与筛选若要修，做法与搜索同理：构建时把各页签/各筛选组合的产品列表预先渲染进去，再把主题 JS 改成本地切换。联系表单则必须引入外部服务（Formspree / Basin / Pages Function）或改为 mailto、WhatsApp。
+
+底部工具栏那一行补一句：正确的修法是在 WordPress 后台主题选项里改标签与链接（改成电话 / WhatsApp / 联系我们），因为在镜像里改会在下次重建时被洗掉。站主 2026-11-05 选择暂不动它，只先处理了产品页询盘按钮（见 README“与原站不同的三处”）。
 
 ---
 

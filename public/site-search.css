@@ -1,0 +1,55 @@
+/*
+ * Styles for the static search replacement (public/site-search.js).
+ *
+ * Everything is scoped to .wd-static-search, a class the script adds itself. Without
+ * JavaScript the marker is absent, these rules match nothing, and the page is exactly
+ * the mirror of the original - which is the property that makes it safe to ship.
+ *
+ * The theme's own stylesheet paints the suggestion items (their class names are reused
+ * verbatim: .autocomplete-suggestions, .suggestion-thumb, .wd-entities-title,
+ * .suggestion-sku, .view-all-results, .suggestion-no-found) and reveals the panel with
+ * its own rule, `.wd-dropdown.wd-opened{visibility:visible;opacity:1}` - which is why
+ * the script puts wd-opened on the dropdown element rather than only on the form.
+ * Nothing here touches visibility or display: an earlier version tried to, and setting
+ * `wd-opened` on the wrong element left the results rendered into the DOM but invisible
+ * on screen, which no static check could see.
+ *
+ * What remains is the two things the theme genuinely does not provide.
+ */
+
+/*
+ * The header stacks at z-index 390; the theme's dropdown default sits below it, so the
+ * panel opened underneath the banner it is supposed to cover.
+ */
+.wd-static-search .search-results-wrapper {
+    z-index: 400;
+}
+
+.wd-static-search .search-results-wrapper .wd-dropdown-results {
+    background: var(--bgcolor-gray-100, #f7f7f7);
+    border-radius: var(--wd-brd-radius, 4px);
+    max-height: min(70vh, 520px);
+}
+
+/* The mobile drawer is in normal flow; pinning its results would clip them. */
+.mobile-nav .wd-static-search .search-results-wrapper .wd-dropdown-results {
+    position: static;
+    box-shadow: none;
+    border: none;
+    max-height: none;
+}
+
+.wd-static-search .autocomplete-suggestion {
+    align-items: center;
+}
+
+.wd-static-search .suggestion-no-found,
+.wd-static-search .view-all-results {
+    color: var(--color-gray-700, #525252);
+}
+
+.wd-static-search .view-all-results a {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+}

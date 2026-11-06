@@ -269,6 +269,67 @@ check(
     : `${floaters.length} page(s) carry trp-${floater}, ${floatersElsewhere.length} elsewhere`,
 );
 
+/* 8. the static search replaces the origin's AJAX one ------------------------- */
+
+/**
+ * The search box used to query PHP. It is now fed by search.json, which the build
+ * derives from the shipped pages, so the things worth asserting are that the index
+ * exists, that it points only at pages and images that exist, and that the dead AJAX
+ * hook is actually gone rather than merely unused - two autocompletes on one input
+ * would race, and the one that cannot fail is the one that wins.
+ */
+let index = [];
+if (known.has('search.json')) {
+  try {
+    index = JSON.parse(readFileSync(join(paths.dist, 'search.json'), 'utf8'));
+  } catch (error) {
+    notes.push(`        search.json did not parse: ${error.message}`);
+  }
+}
+
+check('the search index was built', index.length > 0, `${index.length} entries`);
+check('the search index covers both languages', index.some((e) => e.lang === 'zh') && index.some((e) => e.lang === 'en'));
+
+const indexDeadLinks = index.filter((entry) => !resolvesInOutput(known, entry.url));
+const indexDeadImages = index.filter((entry) => entry.image && !resolvesInOutput(known, entry.image));
+const indexUntitled = index.filter((entry) => !entry.title);
+
+check('every search result points at a page that exists', indexDeadLinks.length === 0, `${indexDeadLinks.length} dead`);
+check('every search thumbnail is a file that exists', indexDeadImages.length === 0, `${indexDeadImages.length} missing`);
+check('every search result has a title', indexUntitled.length === 0, `${indexUntitled.length} blank`);
+for (const entry of indexDeadLinks.slice(0, 5)) notes.push(`        ${entry.url}`);
+for (const entry of indexDeadImages.slice(0, 5)) notes.push(`        ${entry.image}  <- ${entry.url}`);
+
+const ajaxForms = documents.filter((doc) => doc.text.includes('woodmart-ajax-search'));
+check('the theme\'s AJAX autocomplete is switched off', ajaxForms.length === 0, `${ajaxForms.length} page(s) still carry it`);
+
+const withSearch = documents.filter((doc) => doc.text.includes('search-results-wrapper'));
+const unwired = withSearch.filter((doc) => !doc.text.includes('/site-search.js') || !doc.text.includes('/site-search.css'));
+check(
+  'every page with a search box loads the static search',
+  withSearch.length > 0 && unwired.length === 0,
+  withSearch.length === 0
+    ? 'no search box found, so this check measured nothing'
+    : `${withSearch.length} page(s) have one, ${unwired.length} without the script`,
+);
+check('the search runtime files exist', known.has('site-search.js') && known.has('site-search.css'));
+
+/**
+ * A shipped script may not import from the repository.
+ *
+ * public/site-search.js is copied to the site root and loaded as a module by the
+ * browser, so an import of a build-time path resolves to a URL that does not exist.
+ * The browser then refuses the whole module: the search box is dead on every page,
+ * while every unit test still passes because Node resolves the path fine. That is the
+ * exact shape of failure a checker exists to catch, and it can only be caught here -
+ * not by importing the file from Node, which is the thing that lies.
+ */
+const runtimeSource = known.has('site-search.js') ? readFileSync(join(paths.dist, 'site-search.js'), 'utf8') : '';
+const repoImports = [...runtimeSource.matchAll(/^\s*import\s[^\n]*?from\s+['"][^'"]*['"]/gm)].map((match) => match[0].trim());
+
+check('the shipped search script imports nothing', repoImports.length === 0, `${repoImports.length} import(s) in a file the browser must load alone`);
+for (const line of repoImports.slice(0, 3)) notes.push(`        ${line}`);
+
 console.log('\n  mirror checks\n');
 for (const line of [...notes, ...failures]) console.log(line);
 console.log(failures.length ? `\n  ${failures.length} failure(s)\n` : '\n  all checks passed\n');

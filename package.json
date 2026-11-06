@@ -11,7 +11,7 @@
         "mirror": "node tools/mirror.mjs",
         "check": "node tools/check.mjs",
         "verify": "node tools/mirror.mjs && node tools/check.mjs",
-        "test": "node --test tools/ingest/wp/staticize.test.mjs tools/lib/site-links.test.mjs",
+        "test": "node --test tools/ingest/wp/staticize.test.mjs tools/ingest/wp/search-index.test.mjs tools/lib/site-links.test.mjs",
         "wp:data": "node tools/ingest/wp/index.mjs",
         "preview": "node tools/serve.mjs"
     }

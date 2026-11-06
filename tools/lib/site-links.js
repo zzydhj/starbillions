@@ -24,6 +24,31 @@ export const ENQUIRY_PHONE = '13714286517';
 export const ENQUIRE_LABELS = ['Inquire about this product', '咨询此产品'];
 
 /**
+ * Hand the search box over to the static implementation.
+ *
+ * Two things happen here and both are needed. The theme's own autocomplete is keyed off
+ * the woodmart-ajax-search class and posts to /wp-admin/admin-ajax.php, which a static
+ * host cannot answer: leaving the class in place means a spinner that never resolves
+ * running alongside ours. Then the static script and its stylesheet are linked, on pages
+ * that actually contain a search box rather than every page, since the mirror's pages
+ * each load dozens of stylesheets already and an unused one is pure weight.
+ *
+ * The marker class the stylesheet scopes itself to is added by the script at runtime,
+ * not here, so with JavaScript disabled none of these rules apply and the page remains
+ * the mirror.
+ */
+export function enableStaticSearch(html, { css = '/site-search.css', script = '/site-search.js' } = {}) {
+  if (!html.includes('search-results-wrapper')) return { html, wired: false };
+
+  let output = html.replace(/\s*\bwoodmart-ajax-search\b/g, '');
+
+  output = output.replace(/<\/head>/i, `  <link rel="stylesheet" href="${css}" />\n</head>`);
+  output = output.replace(/<\/body>/i, `  <script type="module" src="${script}"></script>\n</body>`);
+
+  return { html: output, wired: true };
+}
+
+/**
  * Point the product enquiry buttons at WhatsApp.
  *
  * On the source site these buttons are Elementor links to a contact page on a third
