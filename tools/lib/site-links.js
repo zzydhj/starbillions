@@ -10,6 +10,7 @@
  * Every function here is pure: html in, html out, so the edits can be tested against
  * a fixture instead of only against a deployed site.
  */
+import { enclosingTag, matchingClose } from './html-tags.js';
 
 /**
  * The owner's preferences for this site, in one place so the builder and the
@@ -117,4 +118,96 @@ export function whatsappUrlFor(input, { defaultCountryCode = '86' } = {}) {
   if (digits.length >= 8) return `https://wa.me/${digits}`;
 
   throw new Error(`"${input}" does not look like a phone number (${digits.length} digits)`);
+}
+
+/**
+ * The mobile bottom bar, rebuilt with three entries that go somewhere.
+ *
+ * As shipped by the source site it is three items labelled `123`, all pointing at
+ * http://starbillions.savetime.work/ - somebody's preview host, not this site, and
+ * not reachable. Only the first item carries an icon; the other two have an empty
+ * icon span, which is where the two gear wheels in the screenshot come from: the
+ * theme's base `.wd-icon` rule supplies a default glyph when no specific icon class
+ * is set, and no `wd-icon-*:before` rule exists anywhere in the mirror's CSS, so
+ * there is no font glyph to choose instead.
+ *
+ * The destinations are the three things a phone visitor of a component supplier
+ * actually wants, each verified to exist as a built page: the phone number the site
+ * already publishes, the product listing, and the contact page. The English entries
+ * point at /en/产品中心/ and /en/联系我们/ because those are the paths the mirror
+ * really wrote - TranslatePress keeps the Chinese slug for the default language and
+ * the mirror reproduces it, so an invented English slug would 404.
+ *
+ * The icons are plain <img> with no lazy placeholder. The bar is above the fold on
+ * every phone and holds three small files, and the site's own lazy mechanism is what
+ * left the first item's icon working while the theme's deferred loading never fired
+ * for product thumbnails in testing.
+ */
+export const MOBILE_TOOLBAR = {
+  zh: [
+    { label: '电话', href: `tel:+86${ENQUIRY_PHONE}`, icon: '/wp-content/uploads/2023/11/phone.svg' },
+    { label: '产品中心', href: '/产品中心/', icon: '/icons/products.svg' },
+    { label: '联系我们', href: '/联系我们/', icon: '/icons/contact.svg' },
+  ],
+  en: [
+    { label: 'Call', href: `tel:+86${ENQUIRY_PHONE}`, icon: '/wp-content/uploads/2023/11/phone.svg' },
+    { label: 'Products', href: '/en/产品中心/', icon: '/icons/products.svg' },
+    { label: 'Contact', href: '/en/联系我们/', icon: '/icons/contact.svg' },
+  ],
+};
+
+/**
+ * Replace every bottom bar on a page with the entries above.
+ *
+ * Matched by structure, not by the dead URL: the same host appears elsewhere in a
+ * page (the owner's own links), and those are not this widget's business. The outer
+ * element's original opening tag is reused rather than written again, so whichever
+ * variant the theme template used - `wd-toolbar-label-show` or not - survives.
+ */
+export function replaceMobileToolbar(html, entries) {
+  const marker = 'class="wd-toolbar ';
+  let output = html;
+  let replaced = 0;
+
+  let cursor = 0;
+  for (;;) {
+    const found = output.indexOf(marker, cursor);
+    if (found === -1) break;
+
+    const start = enclosingTag(output, found, 'div');
+    if (start === -1) {
+      cursor = found + marker.length;
+      continue;
+    }
+
+    const end = matchingClose(output, start, 'div');
+    const block = output.slice(start, end);
+    if (!block.includes('wd-toolbar-link')) {
+      cursor = end;
+      continue;
+    }
+
+    const openTag = `${output.slice(start, output.indexOf('>', start) + 1)}`;
+    const built = toolbarMarkup(openTag, entries);
+    output = output.slice(0, start) + built + output.slice(end);
+    replaced += 1;
+    cursor = start + built.length;
+  }
+
+  return { html: output, replaced };
+}
+
+function toolbarMarkup(openTag, entries) {
+  const items = entries.map(({ label, href, icon }) => [
+    '          <div class="wd-toolbar-link wd-tools-element wd-toolbar-item wd-tools-custom-icon">',
+    `            <a href="${href}">`,
+    '              <span class="wd-toolbar-icon wd-tools-icon wd-icon wd-custom-icon">',
+    `                <img width="1024" height="1024" src="${icon}" class="attachment-thumbnail size-thumbnail" alt="" />`,
+    '              </span>',
+    `              <span class="wd-toolbar-label">${label}</span>`,
+    '            </a>',
+    '          </div>',
+  ].join('\n'));
+
+  return [openTag, ...items, '        </div>'].join('\n        ');
 }

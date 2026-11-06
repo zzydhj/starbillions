@@ -54,7 +54,7 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 | 3 个 `<link>` 字体 | `fonts.googleapis.com` / `fonts.gstatic.com` | 中国大陆无法访问，字体退化到 Arial |
 | 首页地图 `<iframe>` | `maps.google.com` | 大陆打不开，该区域空白 |
 | 首页 Elementor 横幅背景图 | `starbillions.cn/wp-content/uploads/2023-11-10001*.png` | 证书 `ERR_CERT_COMMON_NAME_INVALID`，且该文件在本备份里不存在 → 横幅无背景 |
-| 手机端底部工具栏 | `starbillions.savetime.work` | **每页 3 项，标签全是字面 `123`，3 项链接全指向建站期临时域名**（全站 725 处，217/217 页）。数据来自 Woodmart 主题选项“Bottom toolbar”，不是镜像造成。只有第 1 项有图标（`uploads/2023/11/phone.svg`），第 2、3 项图标容器为空 |
+| ~~手机端底部工具栏~~ | `starbillions.savetime.work` | **已于 2026-11-06 在构建期重写**（`tools/lib/site-links.js` 的 `replaceMobileToolbar`）：3 项改为 电话 `tel:+8613714286517` / 产品中心 `/产品中心/` / 联系我们 `/联系我们/`，英文页对应 Call / Products / Contact。第 2、3 项原本图标容器为空（齿轮是 `.wd-icon` 基类回退），现用 `public/icons/` 里两个自绘 SVG。原数据来自 Woodmart 主题选项“Bottom toolbar”，不是镜像造成 |
 
 **建议**：字体改为自托管（备份里 `wp-content/uploads/` 有 google-fonts 缓存目录可考虑启用）、地图换高德/百度静态图或直接删掉 iframe、两处残留域名替换为正式域名。
 
@@ -75,7 +75,7 @@ href="http://热卖产品"  源缓存 1  ->  产物 1
 
 页签与筛选若要修，做法与搜索同理：构建时把各页签/各筛选组合的产品列表预先渲染进去，再把主题 JS 改成本地切换。联系表单则必须引入外部服务（Formspree / Basin / Pages Function）或改为 mailto、WhatsApp。
 
-底部工具栏那一行补一句：正确的修法是在 WordPress 后台主题选项里改标签与链接（改成电话 / WhatsApp / 联系我们），因为在镜像里改会在下次重建时被洗掉。站主 2026-11-05 选择暂不动它，只先处理了产品页询盘按钮（见 README“与原站不同的三处”）。
+底部工具栏那一行：站主 2026-11-05 先选择不动，2026-11-06 改口要求修复，于是做成了构建期规则（`replaceMobileToolbar` + `MOBILE_TOOLBAR` 表），这样重建不会洗掉。后台主题选项里改仍然是更根本的做法——镜像里的规则只是把站主已确认的偏好固化下来。门禁 `check.mjs` 7c 用幂等性断言：对已发布页面重跑一次替换必须**一字不差且仍找到 1 个栏**，这样检查器不需要自己再解析一遍区域就能证明产物等于诉求。
 
 ---
 

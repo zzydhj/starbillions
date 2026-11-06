@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, walk } from './lib/fs-utils.js';
 import { FLOATER_POSITIONS, ORIGIN_URLS, removeDeadShopControls, resolvesInOutput } from './ingest/wp/staticize.js';
-import { ENQUIRE_LABELS } from './lib/site-links.js';
+import { ENQUIRE_LABELS, MOBILE_TOOLBAR, replaceMobileToolbar } from './lib/site-links.js';
 import { discover } from './mirror.mjs';
 
 /** The origin the mirror was built for, read from its own build report. */
@@ -311,6 +311,55 @@ check(
     ? 'no archive page found, so this check measured nothing'
     : `${archives.length} archive page(s), ${bareArchives.length} with no card: ${bareArchives.slice(0, 3).map((doc) => doc.rel).join(', ')}`,
 );
+
+/* 7c. the mobile bottom bar reaches real destinations ----------------------- */
+
+/**
+ * The bar shipped as three items labelled `123`, each pointing at a preview host on
+ * another domain. Asserted against the same table the build used, so the two cannot
+ * disagree about what the owner asked for, and asserted on destinations rather than
+ * on markup: the point of the edit is that a phone visitor lands somewhere.
+ */
+const bars = documents.filter((doc) => doc.text.includes('wd-toolbar-label-show'));
+const badBars = [];
+
+for (const doc of bars) {
+  const entries = doc.rel.startsWith('en/') ? MOBILE_TOOLBAR.en : MOBILE_TOOLBAR.zh;
+  const rebuilt = replaceMobileToolbar(doc.text, entries);
+
+  // Rebuilding a page that already carries the owner's bar must change nothing, and
+  // must still find exactly one bar to change. Together those say the shipped markup
+  // is the requested markup, without this file parsing the region to compare it.
+  if (rebuilt.replaced !== 1) badBars.push(`${doc.rel}: ${rebuilt.replaced} bar(s) found, expected 1`);
+  if (rebuilt.html !== doc.text) badBars.push(`${doc.rel}: its bar is not the owner's entries`);
+
+  for (const entry of entries) {
+    // tel: and mailto: have no file to resolve; everything else must be a page the
+    // mirror actually wrote, or the fix has only moved the 404 into the footer.
+    if (!/^(tel:|mailto:|https?:)/.test(entry.href) && !resolvesInOutput(known, entry.href)) {
+      badBars.push(`${doc.rel}: ${entry.href} has no page behind it`);
+    }
+
+    if (!known.has(entry.icon.replace(/^\//, ''))) badBars.push(`${doc.rel}: icon ${entry.icon} was not shipped`);
+  }
+}
+
+check(
+  'the mobile bottom bar offers the owner\'s entries and every one of them resolves',
+  bars.length > 0 && badBars.length === 0,
+  bars.length === 0
+    ? 'no bottom bar found, so this check measured nothing'
+    : `${bars.length} page(s) carry a bar, ${badBars.length} problem(s): ${badBars.slice(0, 3).join('; ')}`,
+);
+
+/**
+ * The same preview host also appears inside the 2021 theme-demo posts, in lorem
+ * ipsum body text and in their images. That is the source site's own content, not a
+ * mirror defect, and rewriting post bodies is not this build's call - so it is
+ * counted and shown rather than failed on, where a reader can see it.
+ */
+const demoHost = documents.filter((doc) => doc.text.includes('starbillions.savetime.work'));
+notes.push(`  info  ${demoHost.length} page(s) name the author's old preview host in their body text (2021 theme-demo posts), left as the source wrote it`);
 
 /* 8. the static search replaces the origin's AJAX one ------------------------- */
 

@@ -94,9 +94,9 @@ Pages 项目的设置（Create project → Git → 选 `zzydhj/starbillions`）�
 
 `_headers`、`_redirects`、`sitemap.xml`、`404.html` 都在 `dist/` 里，Pages 会直接生效；深层页面的 `…/index.html` 会自动去后缀，所以链接写 `/product/xxx/` 形式即可。
 
-## 与原站不同的三处（均为有意）
+## 与原站不同的五处（均为有意）
 
-复刻之外，站主明确要求过三个偏离。前两个集中在 `tools/lib/site-links.js`（偏好只写一份，构建器与门禁读同一处）：
+复刻之外，站主明确要求过五个偏离。其中三个集中在 `tools/lib/site-links.js`（偏好只写一份，构建器与门禁读同一处）：
 
 - **语言浮层**：原位置 `trp-bottom-right` 在手机上正好盖住底部菜单项，改为 `trp-top-right`。做法是换 TranslatePress 自己的位置类，不是写 CSS 覆盖 —— 插件的 `.trp-top-right` 规则在源码顺序上晚于 `:hover` 规则，同特异度下后来者赢，不需要 `!important`。
 - **询盘按钮**：产品页那 68 个（中英各 34）原本指向 `starbillions.cn` 的联系页（第三个域名），改为 `https://wa.me/8613714286517`。只按按钮可见文案匹配，所以改文案就会安全地不再命中；其余“联系我们”类链接一律未动。
@@ -118,3 +118,11 @@ Pages 项目的设置（Create project → Git → 选 `zzydhj/starbillions`）�
 
 - `public/site-search.js` **不得 import 任何东西**。它被浏览器当模块加载，`import '../tools/...'` 是仓库路径不是 URL，会 404 导致整个模块不执行——单测全绿而线上功能为 0%。`npm run check` 已断言这一点。
 - `wd-opened` 必须加在 `.wd-dropdown-results` **元素自身**，主题的规则是 `.wd-dropdown.wd-opened{visibility:visible;opacity:1}`；只加在 form 上会匹配不上，结果进了 DOM 但屏幕上看不见。
+
+**4. 分类页那两组死控件删掉了。** 工具栏上的「展示：9 / 12 / 18 / 24」和右侧四个列数切换图标，锚点**连 href 都没有**；把备份里主题 322 个 JS 加全部插件 JS 全搜了一遍，没有任何文件提到 `per-page-variation` / `shop-view` / `per-row-`，所以没有代码在听这个点击 —— 原站上它们也一样点不动，不是复刻弄坏的。另外「每页 24 个」也兑现不了：WP Rocket 只缓存过每个分类的第 1 页，`product-category/*/page/2/` 在镜像里不存在。
+
+删的是整个 Elementor widget 而不是里面的控件（空壳会继续占自己的 margin），并且**按标签配对切，不按文本切**：同一串类名在行内 CSS 里也出现（`wd-products-per-page` 提及 268 次但只有 51 个元素），按文本匹配会凭一个选择器删掉真内容。构建器现在会在自己改动使某页产品卡片数发生移动时直接报错。
+
+**5. 手机端底部栏改成三个真入口。** 原本 3 项标签全是字面 `123`，链接全指向建站期的临时域名。现在是电话（`tel:+8613714286517`）/ 产品中心 / 联系我们，英文页对应 Call / Products / Contact。第 2、3 项原本图标容器是**空的**（截图里两个齿轮是 `.wd-icon` 基类在无具体字形时的回退；镜像 CSS 里根本没有任何 `wd-icon-*:before` 规则），所以图标用了 `public/icons/` 里两个自绘 SVG。英文项指向 `/en/产品中心/` 这种中文路径而不是好看的英文 slug，因为那才是镜像**真正写出**的文件位置 —— TranslatePress 对默认语言保留中文 slug，自己编一个英文 slug 只会 404。
+
+门禁对这一条用幂等断言：对已发布页面重跑 `replaceMobileToolbar` 必须**输出与原文一字不差且仍找到 1 个栏**，再加上每个目标路径都要在产物里真的解析得到。

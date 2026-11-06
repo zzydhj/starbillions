@@ -34,13 +34,13 @@
  * so preferring one of them costs nothing; the three that exist only as mobile are
  * reported rather than skipped.
  */
-import { copyFileSync, readdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { copyFile, mkdir, writeFile as writeFileAsync } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { dirname as posixDirname, join as posixJoin, resolve as posixResolve } from 'node:path/posix';
 import { paths } from './lib/paths.js';
 import { exists, removeTree } from './lib/fs-utils.js';
-import { ENQUIRE_LABELS, ENQUIRY_PHONE, enableStaticSearch, rewriteInquireButtons, whatsappUrlFor } from './lib/site-links.js';
+import { ENQUIRE_LABELS, ENQUIRY_PHONE, MOBILE_TOOLBAR, enableStaticSearch, replaceMobileToolbar, rewriteInquireButtons, whatsappUrlFor } from './lib/site-links.js';
 import { buildSearchIndex } from './ingest/wp/search-index.js';
 import {
   fileReferencesIn,
@@ -238,7 +238,7 @@ export async function build({ quiet = false } = {}) {
   let written = 0;
   let copied = 0;
   let homeHtml = '';
-  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0 };
+  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0 };
   // Inputs for the search index, gathered while writing rather than re-read from disk:
   // the index must describe the pages that were actually shipped, not the cache files
   // they came from.
@@ -298,8 +298,12 @@ export async function build({ quiet = false } = {}) {
       throw new Error(`${page.urlPath}: removing the shop toolbar changed the product card count (${cardsBefore} -> ${cardsAfter})`);
     }
 
+    // Three items labelled `123` pointed every phone visitor at a preview host that
+    // is not this site. Rebuilt with entries that resolve, per language.
+    const bar = replaceMobileToolbar(cleaned.html, page.urlPath.startsWith('/en/') ? MOBILE_TOOLBAR.en : MOBILE_TOOLBAR.zh);
+
     // The origin's search box queried PHP; this points it at a local index instead.
-    const search = enableStaticSearch(cleaned.html);
+    const search = enableStaticSearch(bar.html);
 
     stats.rewritten += out.rewritten;
     stats.dropped += out.dropped;
@@ -311,6 +315,7 @@ export async function build({ quiet = false } = {}) {
     stats.inquireLinks += occurrences(search.html, whatsapp) - occurrences(positioned, whatsapp);
     stats.searchWired += search.wired ? 1 : 0;
     stats.shopControls += Object.values(cleaned.removed).reduce((sum, n) => sum + n, 0);
+    stats.mobileBars += bar.replaced;
     stats.cards += cardsBefore;
 
     if (/^\/product\//.test(page.urlPath) || /^\/en\/product\//.test(page.urlPath)) {
@@ -357,6 +362,7 @@ export async function build({ quiet = false } = {}) {
   console.log(`  lang switcher  floating button moved to ${floaterPosition}`);
   console.log(`  enquiry        ${stats.inquireLinks} buttons -> ${whatsapp || '(left as they were)'}`);
   console.log(`  shop toolbar   ${stats.shopControls} dead control(s) removed, ${stats.cards} product cards kept`);
+  console.log(`  mobile bar     ${stats.mobileBars} bar(s) rebuilt from the owner's entries`);
   console.log(`  search         ${index.length} entries (${index.filter((e) => e.lang === 'en').length} en), ${stats.searchWired} pages wired`);
   console.log(`  uncached links ${unknownPages.size} targets the mirror links to but never rendered`);
   console.log(`  in             ${((Date.now() - started) / 1000).toFixed(1)} s\n`);
@@ -478,9 +484,14 @@ function buildSitemap(pages, origin) {
  * the Pages directives, the favicon, robots, and the static search runtime.
  */
 function copyPublicExtras() {
-  for (const name of ['_headers', '_redirects', 'favicon.svg', 'robots.txt', 'site-search.js', 'site-search.css']) {
+  for (const name of ['_headers', '_redirects', 'favicon.svg', 'robots.txt', 'site-search.js', 'site-search.css',
+    'icons/products.svg', 'icons/contact.svg']) {
     const from = join(paths.public, name);
-    if (exists(from)) copyFileSync(from, join(paths.dist, name));
+    if (!exists(from)) continue;
+
+    const to = join(paths.dist, name);
+    mkdirSync(dirname(to), { recursive: true });
+    copyFileSync(from, to);
   }
 }
 
