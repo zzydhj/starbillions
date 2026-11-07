@@ -245,7 +245,7 @@ check(
 
 const bareHostPages = documents.filter((doc) => doc.text.includes(bareOrigin));
 check(
-  'no page names the bare host, which nothing serves from',
+  'no page names the bare host, which the redirect rules canonicalise away',
   bareHostPages.length === 0,
   `${bareHostPages.length} page(s): ${bareHostPages.slice(0, 3).map((doc) => doc.rel).join(', ')}`,
 );
