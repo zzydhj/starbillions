@@ -111,19 +111,20 @@ Pages 项目的设置（Create project → Git → 选 `zzydhj/starbillions`）�
 
 `_headers`、`_redirects`、`sitemap.xml`、`404.html` 都在 `dist/` 里，Pages 会直接生效；深层页面的 `…/index.html` 会自动去后缀，所以链接写 `/product/xxx/` 形式即可。
 
-### 域名：每个站就是它自己，不做任何跳转
+### 域名：两个域各自主机是 www，裸域由 Cloudflare 301 过来
 
-站主 2026-11-07 最终确认：**没有重定向规则**。`starbillions.cn` 就是 `starbillions.cn`，`tftstar.com` 就是 `tftstar.com`；两者共用一套代码但分开部署，各自服务自己的域名。因此：
+站主 2026-11-07 的两句话要合起来看。两个域名**之间**没有跳转：`starbillions.cn` 就是 `starbillions.cn`，`tftstar.com` 就是 `tftstar.com`，共用一套代码、分开部署、各自服务自己的站。而**每个域内部**，主主机是 `www`：线上实测 `https://starbillions.cn/` 回 `301`，`location: https://www.starbillions.cn/`，`server: cloudflare`。因此：
 
-- **本站声明裸域**：`SITE_ORIGIN = https://starbillions.cn`。这不是新偏好，而是原站自己的写法——构建器读的那份缓存首页里 `canonical = https://tftstar.com/`、hreflang 也是裸域，全篇没有 `www`。镜像不去发明一个原站没用的写法。
+- **本站声明 www**：`SITE_ORIGIN = https://www.starbillions.cn`。备份自己的 canonical 写的是裸域（构建器读的那份缓存首页里 `canonical = https://tftstar.com/`），但那不是照抄的理由：**哪个主机是主的是一个部署决定，不是内容**。留着裸域等于让 sitemap 的 137 条 `<loc>` 每一条先跳一次，而每页 canonical 指着一个只会跳转的地址——两者互相拆台。
+- **跳转那条规则不在仓库里**。`dist/_redirects` 只有 `/index.html → / 308` 一条；bare→www 是 Cloudflare zone 里的 Bulk Redirects。所以改了 `SITE_ORIGIN` 还要看 zone：两者必须说同一件事，README 这一节写的就是“wire 已经怎么回答”而不是“我们希望怎么回答”。
 - **构建负责不写错 host**。`SITE_ORIGIN`（`tools/lib/site-links.js`）是唯一一处，每页的 `rel="canonical"`、hreflang、`og:url`、`sitemap.xml` 的 `<loc>`、`robots.txt` 的 `Sitemap:` 行都**由它**派生（最后这一行以前手写，文件里还留着一句“改这里记得改那里”——现在由构建覆写，耦合消失）。改这个常量后必须重跑 `npm run mirror`。
-- **不配跳转也能跑**，因为产物里所有内部链接都是根绝对路径（`/product/x/`），不依赖访客输的是哪种写法。`www.` 与裸域都打得开、内容一致；只有身份字段选一边，选的是裸域。
+- **门禁里另一种写法是从声明值推出来的**（`otherHost`：声明 www 就禁止裸域，声明裸域就禁止 www），所以翻这个常量会同时翻转断言——**改一半的构建过不了门禁**。另一种写法仍能打开（301 过来），内部链接全为根绝对路径，不依赖访客输哪一种。
 
 **本站只有 `.cn` 这一个后缀。** `starbillions.com` 不是本站地址，也不是将来要收拢的别名。仓库本地目录名叫 `starbillions.com` 只是历史包名，与域名无关（曾导致我把 `.com` 当目标域名写进 canonical/sitemap/robots，已全部纠正，门禁现在守这一条）。
 
-Pages 侧要做的是把域名挂上项：Custom domains 里 `starbillions.cn`（建议连 `www.starbillions.cn` 一起挂，两边内容相同、不会报错）。**不需要 Bulk Redirects 列表**。
+Pages 侧：Custom domains 里 `starbillions.cn` 与 `www.starbillions.cn` **两个都要挂**，Bulk Redirects 里那条 bare→www **不要删**——删了就要把 `SITE_ORIGIN` 改回裸域并重跑构建，否则产物又开始声明一个不会直接服务的主机。
 
-将来要换域名时，改动只有一处：`SITE_ORIGIN` 改成新主机，重跑 `npm run mirror`。这个常量是答案的唯一定义处，产物里不会残留另一个 host（门禁会比对两种写法，只允许声明的那一种）。
+将来要换域名时，仓库内改动只有一处：`SITE_ORIGIN` 改成新主机，重跑 `npm run mirror`。这个常量是答案的唯一定义处，产物里不会残留另一个 host。仓库外只有一件配套事：zone 里那条 bare↔www 规则得与它一致。
 
 ## 与原站不同的十六处（均为有意）
 

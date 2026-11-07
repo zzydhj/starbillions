@@ -26,19 +26,23 @@ export const ENQUIRY_PHONE = '13714286517';
  * produces: each page's `rel="canonical"`, the hreflang alternates, `og:url`,
  * `sitemap.xml`, and the `Sitemap:` line in `robots.txt`.
  *
- * The bare host, because that is what the site itself said before it was mirrored: the
- * cached homepage the builder reads declares `canonical = https://tftstar.com/` and
- * hreflang alternates on the same bare host, with no `www` anywhere. The owner has
- * since confirmed there are no redirect rules at all - this domain is simply itself -
- * so naming the bare host is not a preference layered on top of the content, it is the
- * content's own statement kept intact.
+ * `www`, because that is the host the domain actually resolves on. Measured against the
+ * deployed site on 2026-11-07: `https://starbillions.cn/` answers `301` with
+ * `location: https://www.starbillions.cn/` and `server: cloudflare`. That rule is not in
+ * this repository - `dist/_redirects` holds one line, `/index.html -> / 308`, and it is
+ * not this one - it is a Bulk Redirect in the Cloudflare zone, made by the owner, who
+ * chose `www` as the single primary host for each of the two domains.
  *
- * Two consequences worth knowing, because neither is visible in a page:
+ * The backup's own canonical named the bare host. That is not a reason to copy it here:
+ * which host is primary is a deployment decision, not content, and a canonical that
+ * names a host which only redirects makes every sitemap `<loc>` a redirect (all 137 of
+ * them) while telling a crawler the page lives somewhere it cannot be read.
  *
- *   - With no redirect, `www.` and the bare host both serve the same bytes, and that is
- *     fine: every internal link in the output is root-relative, so nothing depends on
- *     which spelling the visitor typed. Only the identity fields pick a side, and they
- *     pick this one.
+ * Two things worth knowing, because neither is visible in a page:
+ *
+ *   - Internal links stay root-relative, so no page depends on this constant for
+ *     anything but the identity fields: it is those, the sitemap and robots.txt that pick
+ *     a side, and they now pick the side the wire already forces.
  *   - `starbillions.com` is not an address of ours and not a future alias (owner,
  *     2026-11-07). The local directory is named that, which is where an earlier version
  *     of this constant went wrong: it wrote a domain that does not serve the site into
@@ -46,9 +50,11 @@ export const ENQUIRY_PHONE = '13714286517';
  *     while no page looked broken.
  *
  * Changing this value means rerunning `npm run mirror` - the output is generated from
- * it, and the gates re-derive it rather than repeating it.
+ * it, and the gates re-derive it rather than repeating it. And if the zone's bare-to-www
+ * redirect is ever removed, this constant should go back to the bare host: the two
+ * statements have to agree, which is the whole reason it reads `www` today.
  */
-export const SITE_ORIGIN = 'https://starbillions.cn';
+export const SITE_ORIGIN = 'https://www.starbillions.cn';
 
 /**
  * Point `robots.txt` at the sitemap the build just wrote.

@@ -13,4 +13,4 @@ Allow: /
 #
 #   npm run mirror --site-origin https://starbillions.cn
 #
-Sitemap: https://starbillions.cn/sitemap.xml
+Sitemap: https://www.starbillions.cn/sitemap.xml

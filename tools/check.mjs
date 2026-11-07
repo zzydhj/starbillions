@@ -378,14 +378,18 @@ check('Pages headers file was carried over', known.has('_headers'));
 
 /**
  * The output must name one host and only one. Which spelling that host is - with or
- * without `www` - is the owner's choice and has changed twice: the original WordPress
- * declared the bare host (its cached homepage's canonical reads `https://tftstar.com/`),
- * the owner then asked for `www` as the only address, and finally said there are no
- * redirects at all, each domain simply being itself. What does not depend on that
- * choice: whichever spelling the build declares, the *other* one must not appear in a
- * page, because a document naming two hosts makes its own canonical ambiguous - and a
- * page that canonicalises to a host nobody serves from still renders perfectly, which
- * is why this is gated rather than eyeballed.
+ * without `www` - is the owner's choice and has changed three times: the original
+ * WordPress declared the bare host (its cached homepage's canonical reads
+ * `https://tftstar.com/`), the owner then asked for `www` as the only address, then said
+ * there are no redirects at all and each domain is simply itself, and on 2026-11-07 the
+ * deployed site was measured answering the bare host with a `301` to `www` - a rule in
+ * the Cloudflare zone, not in this repository - so `www` is declared again, this time
+ * because the wire says so. What does not depend on that choice: whichever spelling the
+ * build declares, the *other* one must not appear in a page, because a document naming
+ * two hosts makes its own canonical ambiguous - and a page that canonicalises to a host
+ * nobody serves from still renders perfectly, which is why this is gated rather than
+ * eyeballed. The other spelling is derived from the declared one, so flipping the
+ * constant flips the assertion too, and a half-changed build cannot pass it.
  *
  * The robots line and the sitemap are asserted the same way, and each is re-derived
  * with the builder's own function rather than compared against a second copy of the
