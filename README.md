@@ -1,4 +1,4 @@
-# starbillions.com — tftstar.com 的静态复刻
+# www.starbillions.cn — tftstar.com 的静态复刻
 
 原站是 WordPress + WooCommerce + Woodmart + Elementor + TranslatePress 的定制显示屏（TFT，薄膜晶体管）厂商站，中英双语。本仓库把它**原样复刻**成纯静态站点，部署到 Cloudflare Pages。
 
@@ -108,16 +108,18 @@ Pages 项目的设置（Create project → Git → 选 `zzydhj/starbillions`）�
 - **构建负责不写错 host**。`SITE_ORIGIN`（`tools/lib/site-links.js`）是唯一一处，每页的 `rel="canonical"`、hreflang、`og:url`、`sitemap.xml` 的 `<loc>`、`robots.txt` 的 `Sitemap:` 行都**由它**派生（最后这一行以前手写，文件里还留着一句“改这里记得改那里”——现在由构建覆写，耦合消失）。改这个常量后必须重跑 `npm run mirror`。
 - **部署负责把别的写法转过来**。静态文件做不到这件事，它属于 Cloudflare 的 Bulk Redirects（账号级 List + Rule，且**被请求的 hostname 必须是已代理（橙云）的记录**）。源 URL 不能写 query string，`*` 只捕获路径，所以每条都要**勾上“保留查询字符串”**，否则 `?s=`、`?paged=` 会丢。
 
-要填的四条（目标都是 `https://www.starbillions.com/${1}`，状态码 301，保留查询字符串）：
+要填的四条（目标都是 `https://www.starbillions.cn/${1}`，状态码 301，保留查询字符串）：
 
 | 源 URL | 说明 |
 | --- | --- |
-| `https://starbillions.com/*` | 裸域 → www |
-| `http://starbillions.com/*` | 匹配算法要求 scheme 相同，`https` 的模式不接 `http` 请求 |
-| `https://starbillions.cn/*` | 老域名 |
-| `https://www.starbillions.cn/*` | 老域名的 www 写法 |
+| `https://starbillions.cn/*` | 裸域 → www（线上实测：两个写法现在都能打开新站） |
+| `http://starbillions.cn/*` | 匹配算法要求 scheme 相同，`https` 的模式不接 `http` 请求 |
+| `https://starbillions.com/*` | `.com` 已在站主名下但**尚未解析过来**（实测该域名下 `/site-search.js` 是 404），解析好之前这条不生效也无害 |
+| `http://starbillions.com/*` | 同上，另一个 scheme |
 
-另外两件事不在仓库里，但缺一个都不生效：Pages 项目的 Custom domains 必须**同时**挂上 `starbillions.com` 和 `www.starbillions.com`（只挂一个，另一个的请求根本进不到项目）；Bulk Redirects 跑在 Pages `_redirects` **之前**，同一目标不要两边都写（我们的 `_redirects` 只有 `/index.html → /` 一条）。
+另外两件事不在仓库里，但缺一个都不生效：Pages 项目的 Custom domains 必须**同时**挂上 `starbillions.cn` 和 `www.starbillions.cn`（只挂一个，另一个的请求根本进不到项目）；Bulk Redirects 跑在 Pages `_redirects` **之前**，同一目标不要两边都写（我们的 `_redirects` 只有 `/index.html → /` 一条）。
+
+将来把 `.com` 也解析过来时，改动只有一处：`SITE_ORIGIN` 改成 `https://www.starbillions.com`，重跑 `npm run mirror`，再把跳转目标换成 `.com`。这个常量是答案的唯一定义处，产物里不会残留另一个 host（门禁守这一条）。
 
 ## 与原站不同的十三处（均为有意）
 

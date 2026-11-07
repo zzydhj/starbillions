@@ -26,18 +26,25 @@ export const ENQUIRY_PHONE = '13714286517';
  * produces: each page's `rel="canonical"`, the hreflang alternates, `og:url`,
  * `sitemap.xml`, and the `Sitemap:` line in `robots.txt`.
  *
- * `www` is the canonical host because the owner asked for it: every other spelling of
- * the address - bare domain, the old `.cn`, plain `http` - is meant to redirect onto
- * this one. That is a deployment rule, not something a static file can do; the entries
- * belong in Cloudflare's Bulk Redirects list, and they must point *here*, so changing
- * this constant means changing them in the same sitting. Both hostnames also have to be
- * attached to the Pages project, or a request for the other one never reaches a rule.
+ * This is the host the site answers on, measured rather than assumed: on 2026-11-07
+ * `https://starbillions.cn/site-search.js` returns this build's own file, while the
+ * same path on `starbillions.com` and `www.starbillions.com` returns 404 - the `.com`
+ * registration is the owner's but is not pointed here yet. A previous value of this
+ * constant named the `.com`, which meant the live site was declaring a canonical
+ * address on a domain that does not serve it, in every page, in its sitemap, and in
+ * the sitemap URL its robots.txt hands to crawlers.
  *
- * The default used to be the bare domain. Nothing in the output can express both, so
- * the constant is the single place where the choice lives - `npm run mirror
- * --site-origin https://…` still overrides it for an experiment.
+ * `www` is the canonical spelling because the owner asked for it: every other address
+ * - bare domain, plain `http` - is meant to redirect onto this one. That is a
+ * deployment rule, not something a static file can do; the entries belong in
+ * Cloudflare's Bulk Redirects, and they must point *here*, so changing this constant
+ * means changing them in the same sitting. Both hostnames also have to be attached to
+ * the Pages project, or a request for the other one never reaches a rule.
+ *
+ * When `.com` is moved over, this constant is the only place the answer lives: flip it,
+ * rerun `npm run mirror`, and add `.cn` -> `.com` to the redirect list.
  */
-export const SITE_ORIGIN = 'https://www.starbillions.com';
+export const SITE_ORIGIN = 'https://www.starbillions.cn';
 
 /**
  * Point `robots.txt` at the sitemap the build just wrote.

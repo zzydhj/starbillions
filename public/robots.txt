@@ -11,6 +11,6 @@ Allow: /
 # from somewhere else, pass the flag; do not edit this line, or the next build overwrites
 # it and the two disagree until someone notices:
 #
-#   npm run mirror --site-origin https://www.starbillions.com
+#   npm run mirror --site-origin https://www.starbillions.cn
 #
-Sitemap: https://www.starbillions.com/sitemap.xml
+Sitemap: https://www.starbillions.cn/sitemap.xml
