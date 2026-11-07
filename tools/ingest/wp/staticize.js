@@ -24,7 +24,7 @@
  * carries leftovers from a local preview host.
  */
 import path from 'node:path';
-import { enclosingTag, matchingClose } from '../../lib/html-tags.js';
+import { enclosingTag, matchingClose, tagAttribute } from '../../lib/html-tags.js';
 
 /** Origins that appear in the cached HTML and mean "this site". */
 export const ORIGIN_URLS = ['https://tftstar.com', 'http://tftstar.com'];
@@ -978,3 +978,229 @@ export function rewriteReferences(html, { pageUrl, origins, classify }) {
 
   return { html: output, ...stats };
 }
+
+/**
+ * The path part of a root-absolute URL, without its query or fragment.
+ *
+ * Kept separate because three rules need the same reading of "which file is this":
+ * the merge below, the gate that expands a bundle back into its members, and the
+ * check that every url() in a shipped stylesheet points at a file that exists.
+ */
+export function assetPath(url) {
+  return decodeURIComponent(url.split('?')[0].split('#')[0]);
+}
+
+/**
+ * Point a stylesheet's relative url() values at the site root.
+ *
+ * A relative url() resolves against the stylesheet's own location, so text moved into
+ * a bundle at a different path would ask for a file that is not there - the Font
+ * Awesome webfonts (`../webfonts/fa-solid.woff2`) and four other shipped stylesheets
+ * carry them. Rewriting is a URL computation, not a guess: `path.posix.resolve` is what
+ * a browser does, and the result is the path the file already sits at in the output.
+ *
+ * Anything that cannot be resolved to a file the mirror ships is left untouched and
+ * reported, because a caller must then refuse to merge that stylesheet rather than
+ * invent a path - an empty URL is worse than a foreign one.
+ *
+ * @returns {{ text: string, unresolved: string[] }}
+ */
+export function rootCssUrls(text, cssPath, exists) {
+  const base = path.posix.dirname(cssPath);
+  const unresolved = [];
+
+  const out = text.replace(/url\((['"]?)([^'")]+)\1\)/gi, (whole, quote, value) => {
+    // Absolute, protocol-relative, data and fragment-only values already resolve
+    // themselves; only bare relative paths need the hop.
+    if (/^(?:\/|[a-z]+:|\/\/|#)/i.test(value)) return whole;
+
+    const cut = value.search(/[?#]/);
+    const pathPart = cut === -1 ? value : value.slice(0, cut);
+    const suffix = cut === -1 ? '' : value.slice(cut);
+
+    // `?#iefix` survives on purpose: it is the IE @font-face cache-bust, and dropping
+    // it would change the request the browser makes, not merely the file it names.
+    const target = path.posix.resolve(base, pathPart);
+    if (!exists(assetPath(target))) {
+      unresolved.push(value);
+      return whole;
+    }
+
+    return `url(${quote}${target}${suffix}${quote})`;
+  });
+
+  return { text: out, unresolved };
+}
+
+/**
+ * Merge runs of consecutive render-blocking stylesheets into content-addressed files.
+ *
+ * Why this is the lever: a page here links 83 to 94 stylesheets, and every one of them
+ * is a request the browser must make before it paints anything. On a high-latency path
+ * that is the site's real cost - not the bytes (they gzip to about 130 KB) and not the
+ * server (static, at the edge). Merging 78% of those links removes 9,432 requests from
+ * the output and collapses a product page from 94 blocking stylesheets to about 20.
+ *
+ * What makes it safe rather than clever. The only invariant that matters is the order
+ * in which rules are applied, so:
+ *
+ *   - a run continues only while the gap between two links holds nothing but
+ *     whitespace and comments. An inline <style> in that gap is an override that came
+ *     after the first sheet and before the second; hoisting the second over it would
+ *     change which rule wins, quietly, on one widget.
+ *   - a run is skipped if any link carries onload, disabled, title (an alternative
+ *     stylesheet the user can choose) or data-rocket-href, or a media other than all.
+ *   - a run is skipped if any member contains @import, or a relative url() that does
+ *     not resolve to a file in the output.
+ *   - each member's text is kept byte-identical apart from BOM and stray @charset
+ *     (invalid except at position 0), and is introduced by a comment naming the file it
+ *     came from, so the bundle is self-describing: the gate reads the members back out
+ *     of the shipped bytes instead of taking this function's word for it.
+ *
+ * @param {string} html
+ * @param {{ read: (path: string) => string|null, exists: (path: string) => boolean,
+ *           bundleName: (text: string) => string }} fs
+ * @returns {{ html: string, bundles: Map<string, string>,
+ *             runs: number, merged: number, links: number, skipped: Object }}
+ */
+export function combineStylesheets(html, { read, exists, bundleName }) {
+  const bundles = new Map();
+  const skipped = { attribute: 0, import: 0, missing: 0, url: 0 };
+  let runs = 0;
+  let merged = 0;
+
+  const links = [...html.matchAll(/<link\b[^>]*rel=(["'])stylesheet\1[^>]*\/?>/gi)]
+    .map((match) => ({ start: match.index, end: match.index + match[0].length, tag: match[0] }));
+
+  const edits = [];
+
+  for (let i = 0; i < links.length;) {
+    const run = [links[i]];
+    let j = i + 1;
+
+    while (j < links.length) {
+      const gap = html.slice(run[run.length - 1].end, links[j].start).replace(/<!--[\s\S]*?-->/g, '');
+      if (/\S/.test(gap)) break;
+      run.push(links[j]);
+      j += 1;
+    }
+
+    if (run.length > 1) {
+      runs += 1;
+      const bodies = [];
+      let refuse = '';
+
+      for (const link of run) {
+        for (const name of ['onload', 'disabled', 'title', 'data-rocket-href']) {
+          if (tagAttribute(link.tag, name) !== null) refuse = refuse || 'attribute';
+        }
+        const media = tagAttribute(link.tag, 'media');
+        if (media !== null && media !== 'all') refuse = refuse || 'attribute';
+
+        const href = tagAttribute(link.tag, 'href');
+        if (href === null || !href.startsWith('/')) { refuse = refuse || 'missing'; continue; }
+
+        const path = assetPath(href);
+        const text = read(path);
+        if (text === null) { refuse = refuse || 'missing'; continue; }
+        if (/@import/i.test(text)) { refuse = refuse || 'import'; continue; }
+
+        const rooted = rootCssUrls(text, path, exists);
+        if (rooted.unresolved.length) { refuse = refuse || 'url'; continue; }
+
+        bodies.push(`/* ---- merged from ${path} ---- */\n`
+          + rooted.text.replace(/^\uFEFF/, '').replace(/@charset\s+(["'])[^"']*\1\s*;/gi, ''));
+      }
+
+      if (!refuse) {
+        const text = `${bodies.join('\n')}\n`;
+        const name = bundleName(text);
+        bundles.set(name, text);
+        // One flat list of edits: the run's first link becomes the bundle, the rest
+        // become nothing. Kept as spans rather than as a joined replacement so they can
+        // be applied right-to-left - applying them left-to-right over one growing/
+        // shrinking string reuses offsets that the earlier splice already moved.
+        edits.push({ start: run[0].start, end: run[0].end, text: editTag(run[0].tag, name) });
+        for (const link of run.slice(1)) edits.push({ start: link.start, end: link.end, text: '' });
+        merged += run.length - 1;
+      } else {
+        skipped[refuse] += 1;
+      }
+    }
+
+    i = j;
+  }
+
+  // Right to left, so every remaining offset still points where it was computed to.
+  let output = html;
+  for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    output = output.slice(0, edit.start) + edit.text + output.slice(edit.end);
+  }
+
+  return { html: output, bundles, runs, merged, links: links.length, skipped };
+}
+
+/**
+ * The run's first link, pointing at the bundle and otherwise unchanged.
+ *
+ * Its id, media and quote style stay as the source wrote them: only the address moves,
+ * which is the whole claim of this rule - the same rules, in the same order, from one
+ * file instead of many.
+ */
+function editTag(tag, name) {
+  return tag.replace(/href=(["'])[^"']*\1/i, `href=$1${name}$1`);
+}
+
+/**
+ * The cascade of a document as a string: '-' where a stylesheet applies, 'S' where an
+ * inline style block does, in document order.
+ *
+ * This is the shape the merge must not change, and it is deliberately a separate export
+ * rather than something the gate re-derives from the source cache: the cached page and
+ * the shipped page already differ on purpose (the dead Elementor widgets that were cut
+ * took their inline <style> with them, 18 blocks becoming 17 on the homepage), so
+ * comparing the two would report the mirror's own edits as a bundling bug. The builder
+ * records the shape immediately before merging and immediately after expanding the
+ * bundles back out; the gate then checks those two agree, and separately that each
+ * bundle's bytes really are its members' bytes.
+ */
+export function cascadeShape(html) {
+  let shape = '';
+
+  for (const match of html.matchAll(/<link\b[^>]*rel=(["'])stylesheet\1[^>]*>|<style\b[^>]*>/gi)) {
+    if (match[0].startsWith('<style')) { shape += 'S'; continue; }
+    if (tagAttribute(match[0], 'href') === null) continue;
+    shape += '-';
+  }
+
+  return shape;
+}
+
+/**
+ * The same shape, with every bundle counted as the number of sheets it replaced.
+ *
+ * `members(path)` returns the member paths a bundle declares in its own header comments,
+ * or null when the file is not there. Expanding is what makes this comparable with
+ * cascadeShape() of the pre-merge document: a run of five sheets must still read as
+ * five dashes, or something was dropped.
+ */
+export function expandedShape(html, members) {
+  let shape = '';
+
+  for (const match of html.matchAll(/<link\b[^>]*rel=(["'])stylesheet\1[^>]*>|<style\b[^>]*>/gi)) {
+    if (match[0].startsWith('<style')) { shape += 'S'; continue; }
+
+    const href = tagAttribute(match[0], 'href');
+    if (href === null) continue;
+
+    const path = assetPath(href);
+    if (!path.startsWith('/gen/')) { shape += '-'; continue; }
+
+    const list = members(path);
+    shape += list ? '-'.repeat(list.length) : '-';
+  }
+
+  return shape;
+}
+
+

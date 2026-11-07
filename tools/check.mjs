@@ -11,10 +11,11 @@
  * a root-absolute path with no file behind it is a 404 the mirror itself created.
  */
 import { readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, walk } from './lib/fs-utils.js';
-import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, DEAD_AJAX_SCRIPTS, DEAD_AJAX_WIDGETS, absoluteIdentityUrls, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadAjaxScripts, removeDeadShopControls, removeDeadTabsNavigation, removeOwnerMenuItems, resolvesInOutput } from './ingest/wp/staticize.js';
+import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, DEAD_AJAX_SCRIPTS, DEAD_AJAX_WIDGETS, absoluteIdentityUrls, combineStylesheets, expandedShape, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadAjaxScripts, removeDeadShopControls, removeDeadTabsNavigation, removeOwnerMenuItems, resolvesInOutput, rootCssUrls } from './ingest/wp/staticize.js';
 import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRY_PHONE, ENQUIRE_LABELS, MOBILE_TOOLBAR, SITE_ORIGIN, rewriteRobotsSitemap, replaceMobileToolbar, repairPhoneLinks } from './lib/site-links.js';
 import { keyForReference, namedAssetPaths } from './media/apply.js';
 import { discover } from './mirror.mjs';
@@ -172,8 +173,17 @@ function countReferences(texts, pattern, attr) {
 }
 
 const SCRIPT_TAG = /<script\b[^>]*type=["']?rocketlazyloadscript["']?[^>]*>/gi;
-const LINK_TAG = /<link\b[^>]*rel=["']?stylesheet["']?[^>]*>/gi;
 const LAZY_IMG = /<img\b[^>]*data-wood-src=[^>]*>/gi;
+
+/**
+ * One stylesheet link, as the attribute parser reads the rel value.
+ *
+ * Both the merge section and the switcher-survival count below need this shape, and
+ * `rel=["']stylesheet["']` with a backreference rather than an optional quote: the site
+ * writes single quotes in head metadata and double quotes elsewhere, and a pattern that
+ * only sees one of the two reads a quiet zero.
+ */
+const SHEET_LINK = /<link\b[^>]*rel=(["'])stylesheet\1[^>]*>/gi;
 
 /**
  * Only the pages that are supposed to ship. 46 cached pages are the demo content the
@@ -181,14 +191,12 @@ const LAZY_IMG = /<img\b[^>]*data-wood-src=[^>]*>/gi;
  * into a "references lost" failure - the same list the builder filters with, so the
  * two can never disagree about what should exist.
  */
-const sourceTexts = discover(paths.pageCache)
-  .filter((page) => !isOwnerRemoved(page.urlPath))
-  .map((page) => readFileSync(page.file, 'utf8'));
+const sourcePages = discover(paths.pageCache).filter((page) => !isOwnerRemoved(page.urlPath));
+const sourceTexts = sourcePages.map((page) => readFileSync(page.file, 'utf8'));
 const builtTexts = documents.map((doc) => doc.text);
 
 const counted = [
   ['delayed script sources', SCRIPT_TAG, 'data-rocket-src'],
-  ['stylesheet hrefs', LINK_TAG, 'href'],
   ['lazy image sources', LAZY_IMG, 'data-wood-src'],
 ];
 
@@ -205,6 +213,146 @@ for (const [label, pattern, attr] of counted) {
 
   check(`${label} survived the rewrite`, after >= before * 0.95, `${after} in dist from ${before} in the cache`);
 }
+
+/**
+ * The stylesheet merge may change how many files a page asks for. It may not change
+ * which rules reach the page, or the order they arrive in.
+ *
+ * This replaces the `stylesheet hrefs` count above, which measured the wrong thing once
+ * bundles existed: 12,089 links folding into 2,657 is the point of the rule, and a
+ * threshold on link counts would have called the improvement a loss. What still has to
+ * hold is the cascade, and that is asserted two independent ways:
+ *
+ *   - sequence: per page, the ordered run of "a stylesheet applies" and "an inline style
+ *     applies" events, with every bundle expanded back into the members it names, must
+ *     be identical to the cached page's. A bundle hoisted over an inline override would
+ *     change which rule wins on one widget and would be invisible in every other check.
+ *   - bytes: each bundle's text must equal the shipped member files, in the order the
+ *     bundle declares them, after the same two transformations the builder applies
+ *     (relative url() re-rooted, BOM and stray @charset dropped). The bundle states its
+ *     own members in comments, so this reads the output rather than trusting the builder.
+ */
+
+/** The members a bundle was made from, in order, read out of the bundle's own text. */
+function bundleMembers(path) {
+  const abs = join(paths.dist, path.slice(1));
+  if (!exists(abs)) return null;
+  return [...readFileSync(abs, 'utf8').matchAll(/^\/\* ---- merged from (\S+) ---- \*\/$/gm)].map((m) => m[1]);
+}
+
+/**
+ * Per page, the cascade the merge started from against the cascade it produced.
+ *
+ * The baseline is the builder's own record of the page before the pass, not the cached
+ * page: those two already differ on purpose, because the dead Elementor widgets that
+ * were cut took their inline <style> blocks with them (18 becoming 17 on the homepage).
+ * Judging the merge against the cache would blame the wrong rule for the right edit.
+ *
+ * What is still checked, and checked hard, is that expanding the shipped bundles back
+ * into the sheets they declare leaves the same sequence of applications. A run of five
+ * sheets that came back as four, or as five with an 'S' moved across them, fails here -
+ * and the bundle byte check below is independent of both, so neither can cover for the
+ * other.
+ */
+const baseline = reportData.stylesheetCascades ?? {};
+const sequenceBroken = [];
+
+if (Object.keys(baseline).length === 0) {
+  check('the stylesheet merge has a baseline to be checked against', false,
+    'work/mirror-report.json carries no stylesheetCascades - run node tools/mirror.mjs first');
+} else {
+  check('every page has a pre-merge cascade recorded', Object.keys(baseline).length === documents.length,
+    `${Object.keys(baseline).length} recorded for ${documents.length} pages`);
+
+  for (const doc of documents) {
+    const want = baseline[doc.rel];
+    if (want === undefined) { sequenceBroken.push({ rel: doc.rel, want: '(not recorded)', got: '' }); continue; }
+
+    const got = expandedShape(doc.text, bundleMembers);
+    if (got !== want) sequenceBroken.push({ rel: doc.rel, want, got });
+  }
+
+  check(
+    'no merged bundle dropped a stylesheet or moved one across an inline style',
+    sequenceBroken.length === 0,
+    `${sequenceBroken.length} page(s)${sequenceBroken[0]
+      ? `: e.g. ${sequenceBroken[0].rel}\n        was ${sequenceBroken[0].want}\n        is ${sequenceBroken[0].got}` : ''}`,
+  );
+}
+
+const bundlesShipped = files.filter((file) => file.rel.startsWith('gen/'));
+const bundleMismatch = [];
+const bundleNameWrong = [];
+const bundleHoles = [];
+const distKnown = (p) => known.has(p.replace(/^\//, ''));
+
+for (const file of bundlesShipped) {
+  const text = readFileSync(file.abs, 'utf8');
+  const members = bundleMembers(`/${file.rel}`);
+
+  // The name is the content fingerprint the cache policy depends on.
+  if (!file.rel.endsWith(createHash('sha1').update(text).digest('hex').slice(0, 24) + '.css')) {
+    bundleNameWrong.push(file.rel);
+  }
+
+  let cursor = 0;
+  for (const member of members) {
+    const abs = join(paths.dist, member.slice(1));
+    if (!exists(abs)) { bundleHoles.push(`${file.rel} names ${member}`); continue; }
+
+    const rooted = rootCssUrls(readFileSync(abs, 'utf8'), member, distKnown);
+    const expected = `/* ---- merged from ${member} ---- */\n`
+      + rooted.text.replace(/^\uFEFF/, '').replace(/@charset\s+(["'])[^"']*\1\s*;/gi, '');
+
+    if (!text.startsWith(expected, cursor)) bundleMismatch.push(`${file.rel} at ${member}`);
+    cursor += expected.length + 1;
+  }
+}
+
+check(
+  'every bundle contains the shipped bytes of its members, in the order it declares',
+  bundleMismatch.length === 0 && bundleHoles.length === 0,
+  `${bundlesShipped.length} bundle(s), ${bundleMismatch.length} differing segment(s), ${bundleHoles.length} naming a file that is not there`,
+);
+for (const item of bundleMismatch.slice(0, 6)) notes.push(`        ${item}`);
+for (const item of bundleHoles.slice(0, 6)) notes.push(`        ${item}`);
+
+check(
+  'a bundle is named after its own bytes, which is what lets _headers hold it for a year',
+  bundleNameWrong.length === 0,
+  `${bundleNameWrong.length} bundle(s) named otherwise`,
+);
+
+/**
+ * And the pass must be finished: re-running it over the output has to find nothing, the
+ * same way the AJAX and dead-control rules are checked. If it found something, the build
+ * left half the pages unmerged - which would look like a success, just a slow one.
+ */
+const stillMergeable = [];
+for (const doc of documents) {
+  const again = combineStylesheets(doc.text, {
+    read: (p) => (known.has(p.slice(1)) ? readFileSync(join(paths.dist, p.slice(1)), 'utf8') : null),
+    exists: distKnown,
+    bundleName: (text) => `/gen/${createHash('sha1').update(text).digest('hex').slice(0, 24)}.css`,
+  });
+  if (again.bundles.size > 0) stillMergeable.push({ rel: doc.rel, runs: again.bundles.size });
+}
+
+check(
+  'running the merge again over the output finds nothing left to merge',
+  stillMergeable.length === 0,
+  `${stillMergeable.length} page(s)${stillMergeable[0] ? `, e.g. ${stillMergeable[0].rel}` : ''}`,
+);
+
+/**
+ * The two halves of this line are not the same population, and the builder's log is a
+ * third: the cache number is the 137 pages that are supposed to ship, the output number
+ * adds the search stylesheet the build injects (131 pages) and the generated 404 page
+ * (78 links), which is exactly the 12089 the builder counted before it merged. Reading
+ * 11880 and 12089 as a discrepancy would send someone to look for a bug that is not there.
+ */
+const linkedSheets = documents.reduce((n, doc) => n + (doc.text.match(SHEET_LINK) || []).length, 0);
+notes.push(`  info  stylesheets: ${sourceTexts.reduce((n, t) => n + (t.match(SHEET_LINK) || []).length, 0)} links in the cache, ${linkedSheets} in the output as ${bundlesShipped.length} bundle(s) plus singles`);
 
 /* 5. copied CSS may not still name the old host ---------------------------- */
 
@@ -921,13 +1069,24 @@ check(
 const countOf = (text, needle) => text.split(needle).length - 1;
 const survivals = [];
 
+/**
+ * Sheet links are folded into bundles, and TranslatePress's own CSS filenames contain
+ * the very strings this assertion counts (`trp-language-switcher.css` appears in both
+ * the id and the href of one link). Counting them would report the merge as deleting
+ * the switcher, so the links are removed from both sides first: what must survive is the
+ * switcher's DOM, its config object and its compatibility script, all of which live in
+ * the body, not in a stylesheet address.
+ */
+const outsideSheets = (text) => text.replace(SHEET_LINK, '');
+
 for (const page of discover(paths.pageCache).filter((page) => !isOwnerRemoved(page.urlPath))) {
   const doc = builtByPath.get(page.urlPath.endsWith('/') ? page.urlPath : `${page.urlPath}/`);
   if (!doc) continue;
 
-  const source = readFileSync(page.file, 'utf8');
+  const source = outsideSheets(readFileSync(page.file, 'utf8'));
+  const built = outsideSheets(doc.text);
   for (const kept of ['trp-frontend-compatibility', 'trp_data', 'trp-floater', 'trp-language']) {
-    if (countOf(source, kept) !== countOf(doc.text, kept)) survivals.push(`${page.urlPath} ${kept}: ${countOf(source, kept)} -> ${countOf(doc.text, kept)}`);
+    if (countOf(source, kept) !== countOf(built, kept)) survivals.push(`${page.urlPath} ${kept}: ${countOf(source, kept)} -> ${countOf(built, kept)}`);
   }
 }
 
@@ -952,7 +1111,8 @@ check(
  *
  * So the scan runs over every text file in the output rather than the pages alone, and
  * uses the builder's own matcher instead of a second copy of the rule: what the build
- * counted when it chose what to copy is exactly what is counted here.
+ * counted when it chose what to copy is exactly what is counted here. The stylesheet
+ * bundles are text files too, so a url() that reached a bundle is still counted.
  */
 const mediaManifest = exists(join(paths.work, 'media', 'manifest.json'))
   ? JSON.parse(readFileSync(join(paths.work, 'media', 'manifest.json'), 'utf8'))

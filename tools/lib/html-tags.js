@@ -46,3 +46,42 @@ export function enclosingTag(html, at, tag) {
   if (close === -1) return -1;
   return html.slice(open, at).includes('>') ? -1 : open;
 }
+
+/**
+ * The attributes of one tag, as name -> value, with names lower-cased.
+ *
+ * Written here rather than inline at each call site because "does this tag carry
+ * attribute X" is a question with a trap in it: `title` also occurs inside
+ * `id='wd-woo-opt-title-limit-css'`, so a substring test reports nearly every
+ * stylesheet on the site as an alternative stylesheet (`title=`), and a build rule
+ * quietly does nothing while still reporting the counts it expected. One parser, so
+ * the builder and the gate cannot disagree about what an attribute means.
+ *
+ * Handles both quote styles (this site uses single quotes in head metadata and double
+ * quotes elsewhere), unquoted values, and valueless attributes.
+ */
+export function tagAttributes(tag) {
+  const attributes = new Map();
+  const inner = tag.replace(/^<\s*[\w:-]+/, '');
+  const one = /([\w:.-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
+
+  for (const match of inner.matchAll(one)) {
+    const value = match[2] ?? match[3] ?? match[4] ?? '';
+    attributes.set(match[1].toLowerCase(), value);
+  }
+
+  return attributes;
+}
+
+/**
+ * Is this attribute present at all, including the valueless form (`disabled`)?
+ *
+ * `null` means absent, so a caller can tell "not there" from "there but empty" - the
+ * difference matters for `media=""`, which is a real value with a different meaning
+ * from no media attribute at all.
+ */
+export function tagAttribute(tag, name) {
+  const attributes = tagAttributes(tag);
+  const key = name.toLowerCase();
+  return attributes.has(key) ? attributes.get(key) : null;
+}

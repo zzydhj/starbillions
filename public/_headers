@@ -26,11 +26,28 @@
 /wp-content/uploads/*
   Cache-Control: public, max-age=31536000, immutable
 
-# Font Awesome's web fonts and the theme's own font files live in webfonts/ and
+# Font Awesome's web fonts and the theme's own font files live in webfonts/ and 
 # fonts/ directories; they are versioned by directory in practice.
 /wp-content/*webfonts/*
   Cache-Control: public, max-age=31536000, immutable
 /wp-content/*fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The self-hosted Google fonts, named by npm run fonts after a hash of the URL Google
+# serves each one from. Google changes that URL when the bytes change, so the name is a
+# content fingerprint and a year of holding it cannot serve an old font.
+#
+# /fonts/*.css is deliberately NOT here. Its name hashes the stylesheet's own URL, and
+# that URL stays the same while Google's answer for it changes - a new weight, a rotated
+# font version - so caching it forever would strand every visitor on the CSS we fetched
+# months ago, glyph fallbacks and all. Those four files revalidate with the rest.
+/fonts/*.woff2
+  Cache-Control: public, max-age=31536000, immutable
+
+# The merged stylesheet bundles. The builder names each one after the sha1 of its own
+# bytes, so a bundle can only ever contain what its name says: immutable here is a
+# consequence of how the file is named, not a hope.
+/gen/*
   Cache-Control: public, max-age=31536000, immutable
 
 # The HTML itself must never be held: the mirror is regenerated wholesale, and a

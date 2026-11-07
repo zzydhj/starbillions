@@ -10,6 +10,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 
 import {
   fileReferencesIn,
@@ -30,6 +31,8 @@ import {
   rebaseIdentityUrls,
   referencesIn,
   resolvesInOutput,
+  combineStylesheets,
+  rootCssUrls,
   rewriteReferences,
   rootifyOrigins,
   stripLanguagePrefix,
@@ -596,4 +599,156 @@ test('absoluteIdentityUrls puts a full URL back into the identity fields, and on
   const again = absoluteIdentityUrls(out, 'https://starbillions.cn');
   assert.equal(again.absolutised, 0, 'a second pass finds nothing, so nothing is ever prefixed twice');
   assert.equal(again.html, out);
+});
+
+/* ------------------------------------------------------------------ CSS merge */
+
+/**
+ * A tiny in-memory filesystem, because the merge rule's whole subject is which files
+ * exist - and "the gate said 0 missing" once meant the finder was blind, not that the
+ * output was good.
+ */
+function tree(files) {
+  return {
+    read: (p) => (Object.prototype.hasOwnProperty.call(files, p) ? files[p] : null),
+    exists: (p) => Object.prototype.hasOwnProperty.call(files, p),
+    // Named by content, exactly as the builder does: an earlier stub keyed on the byte
+    // length instead, and two same-sized bundles collapsed into one map entry.
+    bundleName: (text) => `/gen/${createHash('sha1').update(text).digest('hex').slice(0, 24)}.css`,
+  };
+}
+
+const sheet = (path, media = 'all') => `<link rel='stylesheet' id='${path.split('/').pop()}' href='${path}' media='${media}' />`;
+
+// The members in the order a browser applies them, read back out of the bundle itself.
+const membersOf = (bundle) => [...bundle.matchAll(/^\/\* ---- merged from (\S+) ---- \*\/$/gm)].map((m) => m[1]);
+
+test('combineStylesheets merges a run and keeps the order the rules arrive in', () => {
+  const html = `<head>${sheet('/a.css')}${sheet('/b.css')}${sheet('/c.css')}</head>`;
+  const files = { '/a.css': 'p{color:red}', '/b.css': 'p{color:blue}', '/c.css': 'p{color:green}' };
+
+  const { html: out, bundles, merged } = combineStylesheets(html, tree(files));
+
+  assert.equal(merged, 2, 'three links became one request, so two disappeared');
+  assert.equal(out.split('rel=\'stylesheet\'').length - 1, 1, 'exactly one stylesheet link is left');
+  assert.equal(bundles.size, 1);
+
+  const [bundle] = bundles.values();
+  assert.deepEqual(membersOf(bundle), ['/a.css', '/b.css', '/c.css'], 'the bundle states its own members, in order');
+  assert.ok(bundle.indexOf('p{color:red}') < bundle.indexOf('p{color:blue}'), 'red still loses to blue');
+  assert.ok(bundle.indexOf('p{color:blue}') < bundle.indexOf('p{color:green}'), 'blue still loses to green');
+});
+
+test('combineStylesheets will not hoist a stylesheet over an inline override', () => {
+  const html = `<head>${sheet('/a.css')}<style id='x-inline-css'>p{color:pink}</style>${sheet('/b.css')}</head>`;
+  const files = { '/a.css': 'p{color:red}', '/b.css': 'p{color:blue}' };
+
+  const { html: out, bundles, skipped } = combineStylesheets(html, tree(files));
+
+  assert.equal(bundles.size, 0, 'nothing was safe to merge');
+  assert.equal(out, html, 'and the document is byte-for-byte what came in');
+  assert.equal(skipped.attribute + skipped.import + skipped.url + skipped.missing, 0, 'not refused for a rule reason, but for structure');
+});
+
+test('combineStylesheets refuses a link it cannot merge without changing behaviour', () => {
+  const files = { '/a.css': 'p{color:red}', '/b.css': 'p{color:blue}' };
+  const pair = `${sheet('/a.css')}${sheet('/b.css')}`;
+  const cases = [
+    ['a print sheet', `${sheet('/a.css', 'print')}${sheet('/b.css')}`],
+    ['a sheet switched by JS', `<link rel='stylesheet' href='/a.css' media='all' onload="this.media='all'" />${sheet('/b.css')}`],
+    ['an alternative style set the user picks', `<link rel='stylesheet' href='/a.css' title='Wide'>${sheet('/b.css')}`],
+    ['a disabled sheet', `<link rel='stylesheet' href='/a.css' disabled>${sheet('/b.css')}`],
+    ['an @import', pair],
+  ];
+
+  for (const [label, html] of cases) {
+    const local = { ...files, '/a.css': label === 'an @import' ? '@import url(/x.css);' : files['/a.css'] };
+    const { bundles } = combineStylesheets(html, tree(local));
+    assert.equal(bundles.size, 0, label);
+  }
+});
+
+test('a word that looks like an attribute name is not an attribute', () => {
+  // This exact id occurs on the live site, and a substring test called every one of
+  // these links an alternative stylesheet, which made the merge do nothing at all
+  // while still reporting clean counts.
+  const html = `<link rel='stylesheet' id='wd-woo-opt-title-limit-css' href='/a.css' media='all' />${sheet('/b.css')}`;
+  const { bundles } = combineStylesheets(html, tree({ '/a.css': 'a{}', '/b.css': 'b{}' }));
+
+  assert.equal(bundles.size, 1, 'the word title inside an id did not block the merge');
+});
+
+// The real Font Awesome sheet in this output: it sits in .../font-awesome/css/ and
+// names its fonts in the sibling webfonts/ directory, so `..` from the css directory is
+// what a browser walks, and the answer is a file the mirror already ships.
+const FA = '/wp-content/plugins/elementor/assets/lib/font-awesome/css/all.min.css';
+const FA_FONTS = '/wp-content/plugins/elementor/assets/lib/font-awesome/webfonts/';
+
+test('relative url() is re-rooted to the file it actually sits at, iefix kept', () => {
+  const exists = (p) => p.startsWith(FA_FONTS);
+  const css = '.i:before{src:url(../webfonts/fa-solid.woff2)}'
+    + '@font-face{src:url(../webfonts/fa-brands-400.eot?#iefix) format("embedded-opentype")}';
+
+  const { text, unresolved } = rootCssUrls(css, FA, exists);
+
+  assert.deepEqual(unresolved, [], 'both resolved to a file that is in the output');
+  assert.ok(text.includes(`url(${FA_FONTS}fa-solid.woff2)`), 'resolved against the stylesheet, not the page');
+  assert.ok(text.includes(`url(${FA_FONTS}fa-brands-400.eot?#iefix)`), 'the IE cache-bust survives: the request must stay the same request');
+});
+
+test('a relative url() with no file in the output is reported, never invented', () => {
+  const { text, unresolved } = rootCssUrls('a{background:url(../img/gone.png)}', '/css/a.css', () => false);
+
+  assert.deepEqual(unresolved, ['../img/gone.png']);
+  assert.equal(text, 'a{background:url(../img/gone.png)}', 'left exactly as it was');
+});
+
+test('merging is idempotent, so a rebuild cannot bundle a bundle', () => {
+  const files = { '/a.css': 'a{}', '/b.css': 'b{}', '/c.css': 'c{}' };
+  const html = `<head>${sheet('/a.css')}${sheet('/b.css')}${sheet('/c.css')}</head>`;
+
+  const once = combineStylesheets(html, tree(files));
+  const twice = combineStylesheets(once.html, tree(files));
+
+  assert.equal(twice.bundles.size, 0, 'a single link is not a run');
+  assert.equal(twice.html, once.html);
+});
+
+test('stray @charset and a BOM do not survive into the middle of a bundle', () => {
+  const files = { '/a.css': '\uFEFF@charset "UTF-8";a{}', '/b.css': '@charset "UTF-8";b{}' };
+  const { bundles } = combineStylesheets(`<head>${sheet('/a.css')}${sheet('/b.css')}</head>`, tree(files));
+
+  const [bundle] = bundles.values();
+  assert.ok(!bundle.includes('\uFEFF'), 'a BOM mid-file is a character, not an encoding declaration');
+  assert.equal((bundle.match(/@charset/g) || []).length, 0, '@charset is only valid at position 0');
+  assert.ok(bundle.includes('a{}') && bundle.includes('b{}'), 'the rules themselves are untouched');
+});
+
+test('the rest of the document is untouched, and non-stylesheet links are left alone', () => {
+  const html = `<head><link rel='icon' href='/f.ico'>${sheet('/a.css')}${sheet('/b.css')}</head><body><p>keep me</p>`;
+  const { html: out } = combineStylesheets(html, tree({ '/a.css': 'a{}', '/b.css': 'b{}' }));
+
+  assert.ok(out.includes("<link rel='icon' href='/f.ico'>"), 'an icon link is not a stylesheet');
+  assert.ok(out.includes('<p>keep me</p>'), 'the body is not this rule\'s business');
+});
+
+test('two runs on one page are both spliced without moving the document around them', () => {
+  // Splices applied left to right reuse offsets an earlier splice already shifted. The
+  // first version of this rule therefore ate the `</head>` and left one merged link
+  // behind - and nothing else in the output looked wrong: the bundles were complete,
+  // the counts went down, and every CSS file still existed.
+  const files = { '/a.css': 'a{}', '/b.css': 'b{}', '/c.css': 'c{}', '/d.css': 'd{}' };
+  const html = `<head>${sheet('/a.css')}${sheet('/b.css')}`
+    + "<style id='mid'>p{color:pink}</style>"
+    + `${sheet('/c.css')}${sheet('/d.css')}</head><body><p>keep me</p>`;
+
+  const { html: out, bundles, merged } = combineStylesheets(html, tree(files));
+
+  assert.equal(merged, 2, 'one link removed from each of two runs');
+  assert.equal(bundles.size, 2, 'one bundle per run, not one per page');
+  assert.ok(out.includes('</head><body><p>keep me</p>'), 'the document after the runs is intact');
+
+  const left = [...out.matchAll(/href=(["'])(\/gen\/[^"']+\.css)\1/g)].map((m) => m[2]);
+  assert.deepEqual(left.sort(), [...bundles.keys()].sort(), 'exactly the bundles produced are linked');
+  assert.ok(!out.includes("href='/b.css'") && !out.includes("href='/d.css'"), 'no merged member is still linked');
 });
