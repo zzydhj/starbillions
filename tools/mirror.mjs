@@ -54,6 +54,7 @@ import {
   rebaseIdentityUrls,
   referencesIn,
   removeDeadAjaxScripts,
+  absoluteIdentityUrls,
   DEAD_AJAX_SCRIPTS,
   removeDeadAjaxWidgets,
   removeDeadShopControls,
@@ -311,7 +312,7 @@ export async function build({ quiet = false } = {}) {
   let written = 0;
   let copied = 0;
   let homeHtml = '';
-  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0, formsReplaced: 0, mapsReplaced: 0, fontsLocal: 0, fontsMissing: 0, demoMenuItems: 0, deadWidgets: 0, deadTabControls: 0, deadScripts: 0, phoneLinks: 0 };
+  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0, formsReplaced: 0, mapsReplaced: 0, fontsLocal: 0, fontsMissing: 0, demoMenuItems: 0, deadWidgets: 0, deadTabControls: 0, deadScripts: 0, phoneLinks: 0, identityUrls: 0 };
   // Written by npm run fonts. An absent manifest is a normal state - the mirror has
   // no network step - so it reads as "keep the original links", not as an error.
   const fontManifestPath = join(paths.public, 'fonts', 'manifest.json');
@@ -370,7 +371,17 @@ export async function build({ quiet = false } = {}) {
     // Two passes the attribute rewrite cannot do: URLs buried in Elementor's
     // data-settings JSON and Woodmart's inline scripts, and the language prefix
     // TranslatePress baked into menu links.
-    const html = stripLanguagePrefix(rootifyOrigins(out.html, origins, siteOrigin));
+    const stripped = stripLanguagePrefix(rootifyOrigins(out.html, origins, siteOrigin));
+
+    // Identity fields want the opposite of assets: a canonical that resolves against
+    // "whichever host the visitor arrived on" is not a canonical rule but the absence of
+    // one. This only has work to do where the site is served from the same domain the
+    // backup came from - the second deployment - so here it counts zero, and the count is
+    // reported rather than assumed.
+    const identified = absoluteIdentityUrls(stripped, siteOrigin);
+    stats.identityUrls += identified.absolutised;
+
+    const html = identified.html;
 
     // The floating language switcher sat bottom-right, on top of the theme's mobile
     // toolbar. Moved by swapping the plugin's own position class, not by overriding.
@@ -528,6 +539,7 @@ export async function build({ quiet = false } = {}) {
   console.log(`  mobile bar     ${stats.mobileBars} bar(s) rebuilt from the owner's entries`);
   console.log(`  stale bits     ${stats.copyrightYears} page(s) re-dated, ${stats.menuLinks} menu link(s) routed, ${stats.menuHrefsDropped} heading(s) unlinked, ${stats.titlesFixed} English title(s) fixed`);
   console.log(`  dead scripts   ${stats.deadScripts} script(s) whose only working feature is a PHP endpoint, ${pruned} file(s) not copied any more`);
+  console.log(`  identity urls  ${stats.identityUrls} canonical/hreflang value(s) put back to an absolute URL`);
   console.log(`  phone links    ${stats.phoneLinks} tel: link(s) redialled from the theme's demo number to +86${ENQUIRY_PHONE}`);
   console.log(`  search         ${index.length} entries (${index.filter((e) => e.lang === 'en').length} en), ${stats.searchWired} pages wired`);
   console.log(`  uncached links ${unknownPages.size} targets the mirror links to but never rendered`);

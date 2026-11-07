@@ -599,6 +599,47 @@ export function rootifyOrigins(html, origins, siteOrigin) {
   return output;
 }
 
+/**
+ * Put a full URL back into the three attributes that describe the page's own identity.
+ *
+ * `rel="canonical"` and the hreflang alternates are read by machines that are not on the
+ * page - a crawler deciding which of two hostnames holds the original, a translation
+ * layer pairing the Chinese and English versions of one product. A root-relative value
+ * resolves against whatever host the reader arrived on, so `www.example.com` and
+ * `example.com` would each declare themselves canonical: not a canonical rule, but the
+ * absence of one. `og:url` is the same story for a share preview.
+ *
+ * This normally holds by construction, because `rebaseIdentityUrls` writes the new origin
+ * into those attributes early in the pass. It stops holding in one configuration, and that
+ * configuration now exists: the second deployment is served from the very domain the
+ * backup was taken from, so the later `rootifyOrigins` pass sees a canonical URL as a
+ * same-site resource and turns it back into `/`. Assets want exactly that behaviour - a
+ * mirror must not fetch its own CSS across the public internet to render a local preview -
+ * and identity fields want the opposite, so this is where the two jobs stop sharing one
+ * function.
+ *
+ * Only a value that already starts with a single `/` is touched: an absolute URL is left
+ * as written, and a protocol-relative one is not guessed at.
+ */
+export function absoluteIdentityUrls(html, siteOrigin) {
+  const origin = siteOrigin.replace(/\/+$/, '');
+  let absolutised = 0;
+
+  const makeAbsolute = (whole, lead, value, quote) => {
+    if (!value.startsWith('/') || value.startsWith('//')) return whole;
+
+    absolutised += 1;
+    return `${lead}${origin}${value}${quote}`;
+  };
+
+  const output = html
+    .replace(/(<link\s+rel="canonical"\s+href=")([^"]*)(")/gi, makeAbsolute)
+    .replace(/(<link\s+rel="alternate"\s+hreflang="[^"]+"\s+href=")([^"]*)(")/gi, makeAbsolute)
+    .replace(/(<meta\s+property="og:url"\s+content=")([^"]*)(")/gi, makeAbsolute);
+
+  return { html: output, absolutised };
+}
+
 function rootifyOne(text, origin, siteOrigin) {
   const host = origin.split('://')[1];
   const hostPattern = host.replace(/\./g, '\\.');

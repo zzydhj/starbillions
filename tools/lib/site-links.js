@@ -26,24 +26,29 @@ export const ENQUIRY_PHONE = '13714286517';
  * produces: each page's `rel="canonical"`, the hreflang alternates, `og:url`,
  * `sitemap.xml`, and the `Sitemap:` line in `robots.txt`.
  *
- * This is the host the site answers on, measured rather than assumed: on 2026-11-07
- * `https://starbillions.cn/site-search.js` returns this build's own file, while the
- * same path on `starbillions.com` returns 404. The owner confirmed the same date that
- * `.cn` is the only suffix this site has - `starbillions.com` is not an address of
- * ours, and not a future alias. An earlier value of this constant named it, which meant
- * the live site was declaring a canonical address on a domain that does not serve it,
- * in every page, in its sitemap, and in the sitemap URL its robots.txt hands to
- * crawlers. The local directory is also called `starbillions.com`, which is where the
- * mistake came from and is only a package name.
+ * The bare host, because that is what the site itself said before it was mirrored: the
+ * cached homepage the builder reads declares `canonical = https://tftstar.com/` and
+ * hreflang alternates on the same bare host, with no `www` anywhere. The owner has
+ * since confirmed there are no redirect rules at all - this domain is simply itself -
+ * so naming the bare host is not a preference layered on top of the content, it is the
+ * content's own statement kept intact.
  *
- * `www` is the canonical spelling because the owner asked for it: every other address
- * - bare domain, plain `http` - is meant to redirect onto this one. That is a
- * deployment rule, not something a static file can do; the entries belong in
- * Cloudflare's Bulk Redirects, and they must point *here*, so changing this constant
- * means changing them in the same sitting. Both hostnames also have to be attached to
- * the Pages project, or a request for the other one never reaches a rule.
+ * Two consequences worth knowing, because neither is visible in a page:
+ *
+ *   - With no redirect, `www.` and the bare host both serve the same bytes, and that is
+ *     fine: every internal link in the output is root-relative, so nothing depends on
+ *     which spelling the visitor typed. Only the identity fields pick a side, and they
+ *     pick this one.
+ *   - `starbillions.com` is not an address of ours and not a future alias (owner,
+ *     2026-11-07). The local directory is named that, which is where an earlier version
+ *     of this constant went wrong: it wrote a domain that does not serve the site into
+ *     every canonical URL, every sitemap `<loc>` and the sitemap URL in robots.txt,
+ *     while no page looked broken.
+ *
+ * Changing this value means rerunning `npm run mirror` - the output is generated from
+ * it, and the gates re-derive it rather than repeating it.
  */
-export const SITE_ORIGIN = 'https://www.starbillions.cn';
+export const SITE_ORIGIN = 'https://starbillions.cn';
 
 /**
  * Point `robots.txt` at the sitemap the build just wrote.

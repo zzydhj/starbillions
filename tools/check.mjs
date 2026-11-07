@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, walk } from './lib/fs-utils.js';
-import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, DEAD_AJAX_SCRIPTS, DEAD_AJAX_WIDGETS, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadAjaxScripts, removeDeadShopControls, removeDeadTabsNavigation, removeOwnerMenuItems, resolvesInOutput } from './ingest/wp/staticize.js';
+import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, DEAD_AJAX_SCRIPTS, DEAD_AJAX_WIDGETS, absoluteIdentityUrls, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadAjaxScripts, removeDeadShopControls, removeDeadTabsNavigation, removeOwnerMenuItems, resolvesInOutput } from './ingest/wp/staticize.js';
 import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRY_PHONE, ENQUIRE_LABELS, MOBILE_TOOLBAR, SITE_ORIGIN, rewriteRobotsSitemap, replaceMobileToolbar, repairPhoneLinks } from './lib/site-links.js';
 import { discover } from './mirror.mjs';
 
@@ -44,10 +44,27 @@ if (html.length === 0) {
 
 const documents = html.map((file) => ({ ...file, text: readFileSync(file.abs, 'utf8') }));
 
+/**
+ * The shipped pages, indexed by the URL path they answer on. Declared here because
+ * several independent sections need it, and a second `const` further down would sit in
+ * the temporal dead zone for everything above it - which reads as a crash in the middle
+ * of the report, not as a missing definition.
+ */
+const builtByPath = new Map(documents.map((doc) => [`/${doc.rel.replace(/index\.html$/, '')}`, doc]));
+
 /* 1. no references to the origin host may survive --------------------------- */
 
+/**
+ * "The origin" means the host the backup was taken from, and the rule is about
+ * references this build cannot control. It has one legitimate exception: a deployment
+ * served from that very domain - the second site is tftstar.com, which is also where
+ * the backup came from - would otherwise have its own canonical URL reported as a
+ * leftover of the origin, on all 138 pages. Only the exact declared origin is excluded,
+ * so a stale `http://` spelling still fails even when `https://` is the site itself.
+ */
+const staleOrigins = ORIGIN_URLS.filter((origin) => origin !== siteOrigin);
 const originHits = documents
-  .map((doc) => ({ rel: doc.rel, hits: ORIGIN_URLS.filter((origin) => doc.text.includes(origin)) }))
+  .map((doc) => ({ rel: doc.rel, hits: staleOrigins.filter((origin) => doc.text.includes(origin)) }))
   .filter((entry) => entry.hits.length > 0);
 
 check(
@@ -210,20 +227,24 @@ check('a sitemap was generated', known.has('sitemap.xml'));
 check('Pages headers file was carried over', known.has('_headers'));
 
 /**
- * The host is a decision, not a detail, and it is the one thing a static mirror cannot
- * enforce on its own: the owner asked for `www` to be the only address, which the
- * deployment's redirect rules do, while the build's job is to never name another host in
- * the first place. Three assertions, because the failure mode is silent - a page that
- * canonicalises to a host nobody serves from looks entirely correct.
+ * The output must name one host and only one. Which spelling that host is - with or
+ * without `www` - is the owner's choice and has changed twice: the original WordPress
+ * declared the bare host (its cached homepage's canonical reads `https://tftstar.com/`),
+ * the owner then asked for `www` as the only address, and finally said there are no
+ * redirects at all, each domain simply being itself. What does not depend on that
+ * choice: whichever spelling the build declares, the *other* one must not appear in a
+ * page, because a document naming two hosts makes its own canonical ambiguous - and a
+ * page that canonicalises to a host nobody serves from still renders perfectly, which
+ * is why this is gated rather than eyeballed.
  *
- *   - robots.txt's sitemap line must be the origin the build used, and re-applying the
- *     builder's own rewrite must change nothing (the file used to carry a hand-written
- *     host plus a comment asking someone to edit both files together);
- *   - every <loc> in the sitemap must be on that host;
- *   - and no shipped page may name the bare host at all, so a future rule that hardcodes
- *     it cannot pass as "just one more URL".
+ * The robots line and the sitemap are asserted the same way, and each is re-derived
+ * with the builder's own function rather than compared against a second copy of the
+ * rule: the robots line must equal the build's origin and re-applying the rewrite must
+ * change nothing, and every <loc> must sit on that host.
  */
-const bareOrigin = siteOrigin.replace('://www.', '://');
+const declaredHost = new URL(siteOrigin).host;
+const otherHost = declaredHost.startsWith('www.') ? declaredHost.slice(4) : `www.${declaredHost}`;
+const otherOrigin = siteOrigin.replace(declaredHost, otherHost);
 const robotsText = exists(join(paths.dist, 'robots.txt')) ? readFileSync(join(paths.dist, 'robots.txt'), 'utf8') : '';
 const sitemapLine = (robotsText.match(/^Sitemap: (\S+)/m) || [])[1] ?? '(no line)';
 
@@ -243,11 +264,62 @@ check(
   `${offHostLocs.length} of ${locs.length}: ${offHostLocs.slice(0, 2).join(', ')}`,
 );
 
-const bareHostPages = documents.filter((doc) => doc.text.includes(bareOrigin));
+const ambiguousPages = documents.filter((doc) => doc.text.includes(otherOrigin));
 check(
-  'no page names the bare host, which the redirect rules canonicalise away',
-  bareHostPages.length === 0,
-  `${bareHostPages.length} page(s): ${bareHostPages.slice(0, 3).map((doc) => doc.rel).join(', ')}`,
+  `no page names the other spelling of this host (${otherHost})`,
+  ambiguousPages.length === 0,
+  `${ambiguousPages.length} page(s): ${ambiguousPages.slice(0, 3).map((doc) => doc.rel).join(', ')}`,
+);
+
+/**
+ * And the canonical has to name the host, not just a path.
+ *
+ * This is the assertion that caught the second deployment shipping `href="/"`: when a
+ * site is served from the same domain the backup was taken from, the pass that turns
+ * same-site absolute URLs into root-relative ones reaches the identity fields too, and a
+ * canonical that resolves against whichever host the visitor arrived on is not a
+ * canonical rule - it is the absence of one.
+ *
+ * Coverage is deliberately not asserted. 54 of the 138 shipped pages carry no canonical
+ * at all - 26 English pages, 24 category archives, the three shop pages and the 404
+ * document this build writes itself - and measured against the cache, that is what the
+ * origin printed: a mirror may not invent a field the source never had. What is asserted
+ * instead is the one failure a mirror can actually cause: dropping a canonical the source
+ * did declare. That comparison runs per page against the cache, so the count of missing
+ * ones is allowed to be whatever the origin made it.
+ */
+const canonicalOf = (text) => (text.match(/<link\s+rel="canonical"\s+href="([^"]+)"/i) || [])[1] ?? null;
+const wrongCanonicals = documents
+  .map((doc) => ({ rel: doc.rel, href: canonicalOf(doc.text) }))
+  .filter((entry) => entry.href !== null && !entry.href.startsWith(`${siteOrigin}/`));
+
+check(
+  'every canonical in the output is an absolute URL on the declared host',
+  wrongCanonicals.length === 0,
+  `${wrongCanonicals.length} wrong of ${documents.filter((doc) => canonicalOf(doc.text) !== null).length} declared${wrongCanonicals.length ? `, e.g. ${wrongCanonicals[0].rel} -> ${wrongCanonicals[0].href}` : ''}`,
+);
+
+const droppedCanonicals = [];
+
+for (const page of discover(paths.pageCache).filter((page) => !isOwnerRemoved(page.urlPath))) {
+  const doc = builtByPath.get(page.urlPath.endsWith('/') ? page.urlPath : `${page.urlPath}/`);
+  if (!doc) continue;
+
+  const source = canonicalOf(readFileSync(page.file, 'utf8'));
+  if (source !== null && canonicalOf(doc.text) === null) droppedCanonicals.push(doc.rel);
+}
+
+check(
+  'no page lost a canonical the cached page declared',
+  droppedCanonicals.length === 0,
+  `${droppedCanonicals.length} page(s): ${droppedCanonicals.slice(0, 3).join(', ')}`,
+);
+
+const identityLeft = documents.filter((doc) => absoluteIdentityUrls(doc.text, siteOrigin).absolutised > 0);
+check(
+  'and running that rule again over the output has nothing left to fix',
+  identityLeft.length === 0,
+  `${identityLeft.length} page(s): ${identityLeft.slice(0, 3).map((doc) => doc.rel).join(', ')}`,
 );
 
 /* 4. the mechanisms the mirror deliberately did not touch ------------------- */
@@ -742,7 +814,6 @@ function catalogueLinks(text) {
 }
 
 const emptySections = (text) => (text.match(/<div class="e-con-inner">\s*<\/div>/g) || []).length;
-const builtByPath = new Map(documents.map((doc) => [`/${doc.rel.replace(/index\.html$/, '')}`, doc]));
 const lostLinks = [];
 const lostCards = [];
 let sectionsCached = 0;

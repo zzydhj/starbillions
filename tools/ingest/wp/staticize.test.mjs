@@ -22,6 +22,7 @@ import {
   moveLanguageFloater,
   originSet,
   removeDeadAjaxScripts,
+  absoluteIdentityUrls,
   removeDeadAjaxWidgets,
   removeDeadShopControls,
   removeDeadTabsNavigation,
@@ -564,5 +565,35 @@ test('removeDeadAjaxScripts drops the translator tag in every form the site prin
 
   const again = removeDeadAjaxScripts(out);
   assert.equal(again.count, 0, 'a second pass finds nothing, so the report cannot double');
+  assert.equal(again.html, out);
+});
+
+test('absoluteIdentityUrls puts a full URL back into the identity fields, and only those', () => {
+  // The exact bytes the second deployment shipped: a canonical that names a path and not
+  // a host, because that site is served from the domain the backup came from, so the
+  // same-site pass reached it as well.
+  const html = [
+    '<link rel="canonical" href="/product/x/" />',
+    '<link rel="alternate" hreflang="zh-CN" href="/product/x/"/>',
+    '<link rel="alternate" hreflang="en-US" href="/en/product/x/"/>',
+    '<meta property="og:url" content="/product/x/">',
+    // An asset must stay root-relative: that is what lets a local preview work without
+    // fetching this site's own CSS across the public internet.
+    '<link rel="stylesheet" href="/wp-content/themes/woodmart/css/main.css">',
+    '<a href="/product/x/">a normal link</a>',
+    '<link rel="icon" href="//cdn.example.test/f.ico">',
+  ].join('');
+
+  const { html: out, absolutised } = absoluteIdentityUrls(html, 'https://starbillions.cn');
+
+  assert.equal(absolutised, 4, 'the relative canonical, the two hreflang alternates and og:url');
+  assert.ok(out.includes('<link rel="canonical" href="https://starbillions.cn/product/x/" />'), 'the canonical names the host now');
+  assert.ok(out.includes('hreflang="en-US" href="https://starbillions.cn/en/product/x/"'), 'and hreflang pairs the two languages on one host');
+  assert.ok(out.includes('<link rel="stylesheet" href="/wp-content/themes/woodmart/css/main.css">'), 'a stylesheet stays root-relative');
+  assert.ok(out.includes('<a href="/product/x/">a normal link</a>'), 'a normal link stays a normal link');
+  assert.ok(out.includes('href="//cdn.example.test/f.ico"'), 'a protocol-relative value is not guessed at');
+
+  const again = absoluteIdentityUrls(out, 'https://starbillions.cn');
+  assert.equal(again.absolutised, 0, 'a second pass finds nothing, so nothing is ever prefixed twice');
   assert.equal(again.html, out);
 });

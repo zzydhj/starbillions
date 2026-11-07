@@ -101,27 +101,19 @@ Pages 项目的设置（Create project → Git → 选 `zzydhj/starbillions`）�
 
 `_headers`、`_redirects`、`sitemap.xml`、`404.html` 都在 `dist/` 里，Pages 会直接生效；深层页面的 `…/index.html` 会自动去后缀，所以链接写 `/product/xxx/` 形式即可。
 
-### 域名：`www` 是唯一地址
+### 域名：每个站就是它自己，不做任何跳转
 
-站主要求“不带 www 的全部定向到带 www，www 为唯一主域名”。这个分工是：
+站主 2026-11-07 最终确认：**没有重定向规则**。`starbillions.cn` 就是 `starbillions.cn`，`tftstar.com` 就是 `tftstar.com`；两者共用一套代码但分开部署，各自服务自己的域名。因此：
 
+- **本站声明裸域**：`SITE_ORIGIN = https://starbillions.cn`。这不是新偏好，而是原站自己的写法——构建器读的那份缓存首页里 `canonical = https://tftstar.com/`、hreflang 也是裸域，全篇没有 `www`。镜像不去发明一个原站没用的写法。
 - **构建负责不写错 host**。`SITE_ORIGIN`（`tools/lib/site-links.js`）是唯一一处，每页的 `rel="canonical"`、hreflang、`og:url`、`sitemap.xml` 的 `<loc>`、`robots.txt` 的 `Sitemap:` 行都**由它**派生（最后这一行以前手写，文件里还留着一句“改这里记得改那里”——现在由构建覆写，耦合消失）。改这个常量后必须重跑 `npm run mirror`。
-- **部署负责把别的写法转过来**。静态文件做不到这件事，它属于 Cloudflare 的 Bulk Redirects（账号级 List + Rule，且**被请求的 hostname 必须是已代理（橙云）的记录**）。源 URL 不能写 query string，`*` 只捕获路径，所以每条都要**勾上“保留查询字符串”**，否则 `?s=`、`?paged=` 会丢。
+- **不配跳转也能跑**，因为产物里所有内部链接都是根绝对路径（`/product/x/`），不依赖访客输的是哪种写法。`www.` 与裸域都打得开、内容一致；只有身份字段选一边，选的是裸域。
 
-要填的两条（目标都是 `https://www.starbillions.cn/${1}`，状态码 301，保留查询字符串）：
+**本站只有 `.cn` 这一个后缀。** `starbillions.com` 不是本站地址，也不是将来要收拢的别名。仓库本地目录名叫 `starbillions.com` 只是历史包名，与域名无关（曾导致我把 `.com` 当目标域名写进 canonical/sitemap/robots，已全部纠正，门禁现在守这一条）。
 
-| 源 URL | 说明 |
-| --- | --- |
-| `https://starbillions.cn/*` | 裸域 → www（线上实测：两个写法现在都能打开本站） |
-| `http://starbillions.cn/*` | 匹配算法要求 scheme 相同，`https` 的模式不接 `http` 请求 |
+Pages 侧要做的是把域名挂上项：Custom domains 里 `starbillions.cn`（建议连 `www.starbillions.cn` 一起挂，两边内容相同、不会报错）。**不需要 Bulk Redirects 列表**。
 
-不要再写一条源为 `https://www.starbillions.cn/*` 的规则：目标就是它本身，那是个自循环。
-
-**本站只有 `.cn` 这一个后缀。** `starbillions.com` 不是本站的地址，也不是将来要收拢的别名（站主 2026-11-07 确认），因此跳转表里不应该出现它，产物里也不应该出现它（门禁的“不得出现裸主机名”就是守这一类写错）。仓库本地目录名叫 `starbillions.com` 只是历史包名，与域名无关；GitHub 仓库名是 `zzydhj/starbillions`，不带后缀。
-
-另外两件事不在仓库里，但缺一个都不生效：Pages 项目的 Custom domains 必须**同时**挂上 `starbillions.cn` 和 `www.starbillions.cn`（只挂一个，另一个的请求根本进不到项目）；Bulk Redirects 跑在 Pages `_redirects` **之前**，同一目标不要两边都写（我们的 `_redirects` 只有 `/index.html → /` 一条）。
-
-将来要换域名时，改动只有一处：`SITE_ORIGIN` 改成新主机，重跑 `npm run mirror`，再把跳转目标换成它。这个常量是答案的唯一定义处，产物里不会残留另一个 host（门禁守这一条）。
+将来要换域名时，改动只有一处：`SITE_ORIGIN` 改成新主机，重跑 `npm run mirror`。这个常量是答案的唯一定义处，产物里不会残留另一个 host（门禁会比对两种写法，只允许声明的那一种）。
 
 ## 与原站不同的十三处（均为有意）
 
