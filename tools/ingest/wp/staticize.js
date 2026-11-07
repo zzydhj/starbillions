@@ -702,10 +702,16 @@ export function jsChunkNames(text) {
  * Hosts the company owns that are not this site.
  *
  * `starbillions.cn` is the owner's older domain, and Elementor baked the homepage
- * banner's background images as absolute URLs to it. That host answers with an
- * invalid certificate, so every visitor saw a banner with no background - the defect
- * is not specific to any country. The same bytes are in the backup at the same paths,
- * so pointing at them is a pointer, not a substitution of someone's artwork.
+ * banner's background images as absolute URLs to it. The reason recorded here used to
+ * be "that host answers with an invalid certificate"; re-checked on 2026-11-07 both
+ * `starbillions.cn` and `www.starbillions.cn` serve the old site over HTTPS, so that
+ * sentence is not evidence I can repeat from here (my fetches go through a proxy, which
+ * cannot prove a real browser's certificate view either way). What does not depend on
+ * the reason: a shipped page should not ask a visitor's browser for artwork on somebody
+ * else's domain - if that domain expires, changes owner, or turns on hotlink protection,
+ * the banner goes blank on a site that did nothing wrong. The same bytes are in the
+ * backup at the same paths, so pointing at them is a pointer, not a substitution of
+ * someone's artwork.
  */
 export const OWNER_FOREIGN_HOSTS = ['starbillions.cn'];
 

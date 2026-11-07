@@ -1,11 +1,16 @@
 User-agent: *
 Allow: /
 
-# The host here must match the --site-origin passed to `npm run mirror`, because that
-# is what the generated sitemap.xml and every page's canonical URL use. A mismatch
-# means crawlers are pointed at a sitemap whose <loc> values are on another domain,
-# and they will discard it. Change both together, or deploy with:
+# The host on the Sitemap line below is written by the build, not by whoever edits this
+# file: `npm run mirror` replaces that line with the same origin it used for every page's
+# canonical URL and every <loc> in sitemap.xml. It has to match, because a robots file
+# naming another domain is read as a foreign sitemap and discarded, and the site loses
+# its index quietly - no page on it looks wrong.
 #
-#   node tools/mirror.mjs --site-origin https://starbillions.com
+# So the value below is only a placeholder for a build that never ran. To serve the site
+# from somewhere else, pass the flag; do not edit this line, or the next build overwrites
+# it and the two disagree until someone notices:
 #
-Sitemap: https://starbillions.com/sitemap.xml
+#   npm run mirror --site-origin https://www.starbillions.com
+#
+Sitemap: https://www.starbillions.com/sitemap.xml

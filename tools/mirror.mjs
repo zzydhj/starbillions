@@ -34,13 +34,13 @@
  * so preferring one of them costs nothing; the three that exist only as mobile are
  * reported rather than skipped.
  */
-import { copyFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { copyFile, mkdir, writeFile as writeFileAsync } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { dirname as posixDirname, join as posixJoin, resolve as posixResolve } from 'node:path/posix';
 import { paths } from './lib/paths.js';
 import { exists, removeTree, copyTree } from './lib/fs-utils.js';
-import { ENQUIRE_LABELS, ENQUIRY_PHONE, CONTACT_FORM_LABELS, MOBILE_TOOLBAR, enableStaticSearch, localizeGoogleFonts, replaceContactForm, replaceMapWithAddress, replaceMobileToolbar, repairMenuLinks, repairPhoneLinks, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './lib/site-links.js';
+import { ENQUIRE_LABELS, ENQUIRY_PHONE, SITE_ORIGIN, rewriteRobotsSitemap, CONTACT_FORM_LABELS, MOBILE_TOOLBAR, enableStaticSearch, localizeGoogleFonts, replaceContactForm, replaceMapWithAddress, replaceMobileToolbar, repairMenuLinks, repairPhoneLinks, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './lib/site-links.js';
 import { buildSearchIndex } from './ingest/wp/search-index.js';
 import {
   fileReferencesIn,
@@ -74,7 +74,7 @@ const MOBILE = 'index-mobile-https.html';
 // this builder applied.
 
 const args = process.argv.slice(2);
-const siteOrigin = valueAfter('--site-origin') ?? 'https://starbillions.com';
+const siteOrigin = valueAfter('--site-origin') ?? SITE_ORIGIN;
 const floaterPosition = valueAfter('--language-floater') ?? 'top-right';
 const whatsapp = whatsappUrlFor(valueAfter('--whatsapp') ?? ENQUIRY_PHONE);
 const dry = args.includes('--dry');
@@ -245,13 +245,16 @@ export async function build({ quiet = false } = {}) {
 
     /**
      * The case copying cannot reach: a url() WordPress wrote absolutely to another
-     * host. Elementor did exactly that for the homepage banner backgrounds, and the
-     * host is the owner's older domain, starbillions.cn, whose certificate does not
-     * validate - so the banner shipped as an empty coloured box for every visitor in
-     * every country. The identical bytes are in the backup at the identical path, which
-     * makes this a pointer rather than a substitution of someone's artwork. A url()
-     * naming a file we do not have keeps its original text: aiming at a hole we made is
-     * worse to explain than aiming at a host that at least has the picture.
+     * host. Elementor did exactly that for the homepage banner backgrounds, and the host
+     * is the owner's older domain, starbillions.cn. Why those images failed to load in
+     * the browser was never re-verified (the note here used to claim a bad certificate,
+     * and both spellings of that host answer over HTTPS when checked on 2026-11-07), but
+     * the fix does not depend on the reason: a shipped page must not fetch its artwork
+     * from a domain this build does not control. The identical bytes are in the backup at
+     * the identical path, which makes this a pointer rather than a substitution of
+     * someone's artwork. A url() naming a file we do not have keeps its original text:
+     * aiming at a hole we made is worse to explain than aiming at a host that at least
+     * has the picture.
      */
     const localized = localizeCssAssetUrls(text, {
       available: (rel) => exists(join(paths.docroot, assetKey(rel))),
@@ -501,7 +504,7 @@ export async function build({ quiet = false } = {}) {
   const sitemap = buildSitemap(pages, siteOrigin);
   await writeFileAsync(join(paths.dist, 'sitemap.xml'), sitemap, 'utf8');
 
-  copyPublicExtras();
+  copyPublicExtras(siteOrigin);
 
   // The index the browser searches. Built from the shipped pages so a product that is
   // missing from the mirror is missing from search too, rather than being offered as a
@@ -648,7 +651,7 @@ function buildSitemap(pages, origin) {
  * Authored files that belong at the site root rather than inside the copied tree:
  * the Pages directives, the favicon, robots, and the static search runtime.
  */
-function copyPublicExtras() {
+function copyPublicExtras(origin) {
   for (const name of ['_headers', '_redirects', 'favicon.svg', 'robots.txt', 'site-search.js', 'site-search.css']) {
     const from = join(paths.public, name);
     if (!exists(from)) continue;
@@ -656,6 +659,14 @@ function copyPublicExtras() {
     const to = join(paths.dist, name);
     mkdirSync(dirname(to), { recursive: true });
     copyFileSync(from, to);
+
+    /**
+     * One exception, because one line here is a promise about another generated file:
+     * the sitemap URL has to sit on the host the sitemap's own <loc> values use. The
+     * file used to carry a hand-written host and a comment asking someone to change
+     * both together, which is a coupling, not a rule.
+     */
+    if (name === 'robots.txt') writeFileSync(to, rewriteRobotsSitemap(readFileSync(to, 'utf8'), origin), 'utf8');
   }
 
   // The fetched fonts are a tree of unknown names, so they are copied by walking

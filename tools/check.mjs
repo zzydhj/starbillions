@@ -15,14 +15,14 @@ import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, walk } from './lib/fs-utils.js';
 import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, DEAD_AJAX_SCRIPTS, DEAD_AJAX_WIDGETS, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadAjaxScripts, removeDeadShopControls, removeDeadTabsNavigation, removeOwnerMenuItems, resolvesInOutput } from './ingest/wp/staticize.js';
-import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRY_PHONE, ENQUIRE_LABELS, MOBILE_TOOLBAR, replaceMobileToolbar, repairPhoneLinks } from './lib/site-links.js';
+import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRY_PHONE, ENQUIRE_LABELS, MOBILE_TOOLBAR, SITE_ORIGIN, rewriteRobotsSitemap, replaceMobileToolbar, repairPhoneLinks } from './lib/site-links.js';
 import { discover } from './mirror.mjs';
 
 /** The origin the mirror was built for, read from its own build report. */
 const reportData = exists(join(paths.work, 'mirror-report.json'))
   ? JSON.parse(readFileSync(join(paths.work, 'mirror-report.json'), 'utf8'))
   : {};
-const siteOrigin = reportData.siteOrigin ?? 'https://starbillions.com';
+const siteOrigin = reportData.siteOrigin ?? SITE_ORIGIN;
 const siteHost = new URL(siteOrigin).host;
 
 const failures = [];
@@ -208,6 +208,47 @@ check('the mirror has a root document', documents.some((doc) => doc.rel === 'ind
 check('english pages exist', documents.some((doc) => doc.rel.startsWith(`en${'/'}`) || doc.rel.startsWith('en\\')));
 check('a sitemap was generated', known.has('sitemap.xml'));
 check('Pages headers file was carried over', known.has('_headers'));
+
+/**
+ * The host is a decision, not a detail, and it is the one thing a static mirror cannot
+ * enforce on its own: the owner asked for `www` to be the only address, which the
+ * deployment's redirect rules do, while the build's job is to never name another host in
+ * the first place. Three assertions, because the failure mode is silent - a page that
+ * canonicalises to a host nobody serves from looks entirely correct.
+ *
+ *   - robots.txt's sitemap line must be the origin the build used, and re-applying the
+ *     builder's own rewrite must change nothing (the file used to carry a hand-written
+ *     host plus a comment asking someone to edit both files together);
+ *   - every <loc> in the sitemap must be on that host;
+ *   - and no shipped page may name the bare host at all, so a future rule that hardcodes
+ *     it cannot pass as "just one more URL".
+ */
+const bareOrigin = siteOrigin.replace('://www.', '://');
+const robotsText = exists(join(paths.dist, 'robots.txt')) ? readFileSync(join(paths.dist, 'robots.txt'), 'utf8') : '';
+const sitemapLine = (robotsText.match(/^Sitemap: (\S+)/m) || [])[1] ?? '(no line)';
+
+check(
+  'robots.txt names the sitemap on the host the build serves from',
+  sitemapLine === `${siteOrigin}/sitemap.xml` && rewriteRobotsSitemap(robotsText, siteOrigin) === robotsText,
+  `line: ${sitemapLine}, origin: ${siteOrigin}`,
+);
+
+// The capture group, not the whole match: `String.match` with /g hands back the
+// surrounding `<loc>` tags too, and every entry then "fails" a startsWith on the URL.
+const locs = [...readFileSync(join(paths.dist, 'sitemap.xml'), 'utf8').matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+const offHostLocs = locs.filter((loc) => !loc.startsWith(`${siteOrigin}/`));
+check(
+  'every sitemap <loc> is on that same host',
+  offHostLocs.length === 0,
+  `${offHostLocs.length} of ${locs.length}: ${offHostLocs.slice(0, 2).join(', ')}`,
+);
+
+const bareHostPages = documents.filter((doc) => doc.text.includes(bareOrigin));
+check(
+  'no page names the bare host, which nothing serves from',
+  bareHostPages.length === 0,
+  `${bareHostPages.length} page(s): ${bareHostPages.slice(0, 3).map((doc) => doc.rel).join(', ')}`,
+);
 
 /* 4. the mechanisms the mirror deliberately did not touch ------------------- */
 

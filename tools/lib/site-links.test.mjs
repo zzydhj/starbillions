@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { COPYRIGHT_YEAR, EN_PAGE_TITLES, MOBILE_TOOLBAR, googleFontStylesheetUrls, localizeGoogleFonts, normalizeFontUrl, replaceContactForm, replaceMapWithAddress, repairMenuLinks, repairPhoneLinks, replaceMobileToolbar, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './site-links.js';
+import { COPYRIGHT_YEAR, EN_PAGE_TITLES, MOBILE_TOOLBAR, SITE_ORIGIN, googleFontStylesheetUrls, localizeGoogleFonts, normalizeFontUrl, replaceContactForm, replaceMapWithAddress, repairMenuLinks, repairPhoneLinks, replaceMobileToolbar, rewriteInquireButtons, rewriteRobotsSitemap, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './site-links.js';
 
 const URL = 'https://wa.me/8613714286517';
 const LABELS = ['Inquire about this product', '咨询此产品'];
@@ -347,4 +347,26 @@ test('repairPhoneLinks dials the company from the invisible link too, in both en
   assert.ok(!out.includes('064'), 'the New Zealand number is gone');
   assert.equal((out.match(/href="tel:\+8613714286517"/g) || []).length, 3, 'and all three now dial the same place');
   assert.ok(out.includes('Phone: (86) 13714286517'), 'the visible text is left as written');
+});
+
+test('rewriteRobotsSitemap puts the sitemap line on the host the build serves from', () => {
+  // The bytes as they were authored: a hand-written bare host, with the file's own
+  // comment asking someone to remember to change it in step with the build.
+  const authored = 'User-agent: *\nAllow: /\n\n# keep both in step\nSitemap: https://starbillions.com/sitemap.xml\n';
+
+  const out = rewriteRobotsSitemap(authored, SITE_ORIGIN);
+
+  assert.ok(out.includes(`Sitemap: ${SITE_ORIGIN}/sitemap.xml`), 'the line names the build\'s own host');
+  assert.ok(!out.includes('Sitemap: https://starbillions.com'), 'and the hand-written host is not left behind');
+  assert.ok(out.includes('# keep both in step'), 'the rest of the file is the owner\'s text, untouched');
+  assert.equal(rewriteRobotsSitemap(out, SITE_ORIGIN), out, 'a second pass changes nothing');
+
+  assert.ok(
+    rewriteRobotsSitemap('User-agent: *\nAllow: /\n', SITE_ORIGIN).includes(`Sitemap: ${SITE_ORIGIN}/sitemap.xml`),
+    'a file that forgot the line gets one, rather than shipping a robots with no sitemap',
+  );
+
+  // A trailing slash on the flag would otherwise produce `...com//sitemap.xml`, which
+  // is a 404 that looks like a correct URL in every log line.
+  assert.equal(rewriteRobotsSitemap('Sitemap: x\n', `${SITE_ORIGIN}/`), `Sitemap: ${SITE_ORIGIN}/sitemap.xml\n`);
 });

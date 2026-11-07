@@ -21,6 +21,43 @@ import { enclosingTag, matchingClose } from './html-tags.js';
  */
 export const ENQUIRY_PHONE = '13714286517';
 
+/**
+ * The one host this site is served from, written into every absolute URL the build
+ * produces: each page's `rel="canonical"`, the hreflang alternates, `og:url`,
+ * `sitemap.xml`, and the `Sitemap:` line in `robots.txt`.
+ *
+ * `www` is the canonical host because the owner asked for it: every other spelling of
+ * the address - bare domain, the old `.cn`, plain `http` - is meant to redirect onto
+ * this one. That is a deployment rule, not something a static file can do; the entries
+ * belong in Cloudflare's Bulk Redirects list, and they must point *here*, so changing
+ * this constant means changing them in the same sitting. Both hostnames also have to be
+ * attached to the Pages project, or a request for the other one never reaches a rule.
+ *
+ * The default used to be the bare domain. Nothing in the output can express both, so
+ * the constant is the single place where the choice lives - `npm run mirror
+ * --site-origin https://…` still overrides it for an experiment.
+ */
+export const SITE_ORIGIN = 'https://www.starbillions.com';
+
+/**
+ * Point `robots.txt` at the sitemap the build just wrote.
+ *
+ * The `Sitemap:` line cannot be hand-written, whatever the file's own comment used to
+ * claim: the URL has to be on the same host as every `<loc>` inside that file, and a
+ * robots file naming another domain is not merely untidy - crawlers read it as a
+ * foreign sitemap and discard it, so the site silently loses its index. The mirror
+ * already knows the host, because it wrote every canonical URL with it, so deriving the
+ * line here removes the coupling instead of documenting it.
+ *
+ * Written as a function the gate can run again over the output: applying it twice must
+ * change nothing, which is how "the build owns this line" is told apart from "the build
+ * noticed this line once".
+ */
+export function rewriteRobotsSitemap(text, siteOrigin = SITE_ORIGIN) {
+  const line = `Sitemap: ${siteOrigin.replace(/\/+$/, '')}/sitemap.xml`;
+  return /^Sitemap: \S*/m.test(text) ? text.replace(/^Sitemap: \S*/m, line) : `${text.trimEnd()}\n\n${line}\n`;
+}
+
 /** The button labels that mean "send me an enquiry about this product". */
 export const ENQUIRE_LABELS = ['Inquire about this product', '咨询此产品'];
 
