@@ -350,14 +350,15 @@ test('repairPhoneLinks dials the company from the invisible link too, in both en
 });
 
 test('rewriteRobotsSitemap puts the sitemap line on the host the build serves from', () => {
-  // The bytes as they were authored: a hand-written bare host, with the file's own
-  // comment asking someone to remember to change it in step with the build.
-  const authored = 'User-agent: *\nAllow: /\n\n# keep both in step\nSitemap: https://starbillions.com/sitemap.xml\n';
+  // The bytes as they were authored: a hand-written wrong host, with the file's own
+  // comment asking someone to remember to change it in step with the build. The host is
+  // an obvious fixture, not one of the domains this site is or was served from.
+  const authored = 'User-agent: *\nAllow: /\n\n# keep both in step\nSitemap: https://old.example.test/sitemap.xml\n';
 
   const out = rewriteRobotsSitemap(authored, SITE_ORIGIN);
 
   assert.ok(out.includes(`Sitemap: ${SITE_ORIGIN}/sitemap.xml`), 'the line names the build\'s own host');
-  assert.ok(!out.includes('Sitemap: https://starbillions.com'), 'and the hand-written host is not left behind');
+  assert.ok(!out.includes('Sitemap: https://old.example.test'), 'and the hand-written host is not left behind');
   assert.ok(out.includes('# keep both in step'), 'the rest of the file is the owner\'s text, untouched');
   assert.equal(rewriteRobotsSitemap(out, SITE_ORIGIN), out, 'a second pass changes nothing');
 

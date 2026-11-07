@@ -177,12 +177,14 @@ test('identity metadata keeps an absolute URL, on the new origin', () => {
     '<a href="https://tftstar.com/product/x/">link</a>',
   ].join('');
 
-  const rebased = rebaseIdentityUrls(html, origins, 'https://starbillions.com');
+  // A host that is obviously a fixture. Naming a real domain of ours here would read
+  // like a statement about where the site lives, and it is only an argument.
+  const rebased = rebaseIdentityUrls(html, origins, 'https://new.example.test');
 
-  assert.match(rebased, /rel="canonical" href="https:\/\/starbillions\.com\/product\/x\/"/);
-  assert.match(rebased, /hreflang="en" href="https:\/\/starbillions\.com\/en\/product\/x\/"/);
-  assert.match(rebased, /og:url" content="https:\/\/starbillions\.com/);
-  assert.match(rebased, /"@id":"https:\/\/starbillions\.com\/#site"/, 'JSON-LD ids move too');
+  assert.match(rebased, /rel="canonical" href="https:\/\/new\.example\.test\/product\/x\/"/);
+  assert.match(rebased, /hreflang="en" href="https:\/\/new\.example\.test\/en\/product\/x\/"/);
+  assert.match(rebased, /og:url" content="https:\/\/new\.example\.test/);
+  assert.match(rebased, /"@id":"https:\/\/new\.example\.test\/#site"/, 'JSON-LD ids move too');
   assert.match(rebased, /<a href="https:\/\/tftstar\.com\/product\/x\/">/, 'an ordinary link is left for the other pass');
 });
 
@@ -220,15 +222,15 @@ test('rootifyOrigins: every spelling of a same-site URL becomes a same-site path
 
   // Both functions return a plain string, unlike rewriteReferences, which reports
   // counts alongside its html.
-  const out = rootifyOrigins(html, origins, 'https://starbillions.com');
+  const out = rootifyOrigins(html, origins, 'https://new.example.test');
 
   assert.match(out, /href="\/wp-content\/themes\/woodmart\/css\/main\.css\?ver=1"/, 'plain URL with query');
   assert.match(out, /"slideshow":"\/wp-content\/uploads\/a\.jpg"|slideshow&quot;:&quot;\/wp-content\/uploads\/a\.jpg/,
     'escaped JSON spelling, still valid JSON');
-  assert.match(out, /"baseUrl":"https:\/\/starbillions\.com"/, 'a bare origin stays absolute for concatenation');
+  assert.match(out, /"baseUrl":"https:\/\/new\.example\.test"/, 'a bare origin stays absolute for concatenation');
   assert.match(out, /"ajax":"\/wp-admin\/admin-ajax\.php"/, 'the http:// variant is not left as http:/');
   assert.match(out, /src="\/wp-content\/uploads\/b\.png"/, 'protocol-relative');
-  assert.match(out, /u=https%3A%2F%2Fstarbillions\.com/, 'share links keep a full URL');
+  assert.match(out, /u=https%3A%2F%2Fnew\.example\.test/, 'share links keep a full URL');
   assert.ok(!out.includes('tftstar.com'), 'nothing may still name the old host');
   assert.ok(!/http:\/\/[a-z]/i.test(out.match(/"ajax":"[^"]*"/)[0]), 'no corrupted scheme left behind');
 });
