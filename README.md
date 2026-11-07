@@ -1,15 +1,16 @@
-# www.starbillions.cn — tftstar.com 的静态复刻
+# starbillions.cn — tftstar.com 的静态复刻
 
 原站是 WordPress + WooCommerce + Woodmart + Elementor + TranslatePress 的定制显示屏（TFT，薄膜晶体管）厂商站，中英双语。本仓库把它**原样复刻**成纯静态站点，部署到 Cloudflare Pages。
 
 关键事实：复刻的输入不是重建，而是**原站自己的产物**。备份 `24.4.22-tftstar/` 里有 `wp-content/cache/wp-rocket/` —— WP Rocket 的页面渲染缓存，存的是 PHP 执行**之后**的完整文档（217 页，含主题 header/footer、双语版本）。因此不需要跑 PHP 或 MySQL 就能得到 1:1 结果。
 
-零运行时依赖，只用 Node 内置模块（要求 Node ≥ 20）。
+镜像本身零运行时依赖，只用 Node 内置模块（要求 Node ≥ 20）。唯一的例外是可选的 `npm run images`，它需要 devDependency `sharp`（视频首帧还需本机 `ffmpeg`），只跑在开发机上：Pages 不构建，产物里的 WebP 就是普通文件。
 
 ## 命令
 
 ```
 npm run wp:data     备份的 SQL dump  -> data/wp-*.json（结构化内容）
+npm run images      大图转 WebP + 视频首帧当 poster -> work/media/（可选，见下）
 npm run mirror      页面缓存 + 归档资源 -> dist/
 npm run check       校验产物（部署门禁，失败退出码 1）
 npm run verify      mirror + check
@@ -18,6 +19,10 @@ npm run preview     本地起 dist/
 ```
 
 没有 `deploy` 脚本：发布靠推到 GitHub，Pages 从仓库取产物（见下）。
+
+`npm run images` 是**唯一需要依赖与本地工具的命令**（`sharp` + `ffmpeg`），且只在开发机上跑：
+它写的 `work/media/manifest.json` 不入库，Pages 也不跑构建，所以没跑过这条命令时镜像照旧发原站的字节——
+**慢一点，不是坏掉**。跑过一遍之后，`npm run mirror` 才会把引用改成 WebP。
 
 `node tools/mirror.mjs --site-origin https://your-domain.com` 换目标域名；
 `--language-floater top-right|top-left|bottom-right|bottom-left` 换语言浮层位置；
@@ -31,6 +36,8 @@ tools/check.mjs             产物校验器（部署前跑）
 tools/serve.mjs             静态预览服务器
 tools/lib/paths.js          所有路径的唯一来源
 tools/lib/fs-utils.js       文件遍历与删除
+tools/media/convert.mjs     npm run images：转 WebP / 视频首帧，写 work/media/manifest.json
+tools/media/apply.js        把那张表落到一份成品文档上（唯一有单测的媒体层）
 tools/ingest/wp/            WordPress 备份的读取与探测
   sql-dump.js               MySQL dump 状态机解析器（不能用行正则：post_content 含 \n 与 );）
   model.js                  行 -> 对象、postmeta 按 post 聚合
@@ -60,6 +67,7 @@ work/                       临时物：解包的 1 GB docroot、解压后的 SQ
 6. **`<base>` 必须整块删除**，不能只清空它的 `href`：属性改写会先把 `href` 掏空，之后要求 `href="..."` 的正则再也匹配不到那个空元素，留下的 `<base>` 会毁掉全站相对链接。
 7. **TranslatePress 的 `/zh_cn/` 前缀要剥掉**（`/zh_cn/P` → `/P`，`/en/zh_cn/P` → `/en/P`）。原站由插件在请求时改写；静态树没有。实测剥完指向的页面**确实存在**，不是把 404 挪个地方。
 8. **资源发现要走三跳，且只对“本地确实有”的跨域地址动手。** 第一跳是页面里的引用（按路径形态而非属性名），第二跳是已拷 CSS 的 `url()`（不然整套 Font Awesome 字体丢），第三跳是已拷 JS 里**按名字要到**的 webpack 分块（`名字.哈希.bundle.min.js` 只存在于 Elementor 的 runtime 表里，前两跳永远看不到）。跳不过去的时候宁可保留原样：CSS 里指向旧域的绝对地址**只在备份里有同一相对路径的字节时**才改指向本地——指到一个自己造的空路径比指到一个至少有图的旧域更难解释，也更快使门禁变成假报告。
+9. **媒体改写是最后一道工序，而且它判“还需要拷什么”看的是产物、不是缓存。** 一张图的引用在同一页里可能有四种写法（绝对域名、根绝对、百分号编码、原样中文），而编码形状要到 URL 改写之后才定下来，所以加 `.webp` 这一刀必须在最后，且要同时命中两种拼法：只按文件系统的拼法去匹配，会漏掉一个 `srcset`——而漏掉的那一半在原图被剪掉之后就是一个 404。剪不剪同理：页面过了改写，拷出去的 CSS 没有，所以“这张原图还有人提吗”只能在写完之后扫 dist 来回答（扫的时候锚在清单自己的目录上，不靠“长得像个文件名”：`x(1).jpg`、`Picture topaz.png`、`微信图片_2023111.jpg` 都会挫败一个过于宽的文件名模式，而错方向的代价是一个图打不开）。
 
 ## 校验器断言什么
 
@@ -75,6 +83,7 @@ work/                       临时物：解包的 1 GB docroot、解压后的 SQ
 - 只能 AJAX 的组件：整块删的删到了、只删控件的挖不出东西了，且**每页产品卡片数与缓存页相等**（删控件不许带走内容）
 - `tel:` 链接全站只能有一个号码，且必须等于 `ENQUIRY_PHONE`
 - 只能 AJAX 的脚本：页面不加载它、重跑规则挖不出东西，且**语言切换相关四组计数逐页与缓存页相等**（防的是删的时候把旁边的切换器一并带走）
+- 媒体改写两边都对得上：产物点名的转换文件**必须在产物里**、产物**不得还点原图**（页面级）、不得带着没人要的转换文件，而带视频的页必须真的写了 poster；没跑 `npm run images` 时这一组降级为一条 info
 - 双语结构齐备（根文档、`/en/`、sitemap、`_headers`、`404.html`）
 
 `404.html` 用首页自己的 header/footer 拼装（原站从未缓存 404 页），因此它不是复刻、是补作 —— 站点名从首页 `<title>` 后缀取，不硬编码。
@@ -115,9 +124,9 @@ Pages 侧要做的是把域名挂上项：Custom domains 里 `starbillions.cn`�
 
 将来要换域名时，改动只有一处：`SITE_ORIGIN` 改成新主机，重跑 `npm run mirror`。这个常量是答案的唯一定义处，产物里不会残留另一个 host（门禁会比对两种写法，只允许声明的那一种）。
 
-## 与原站不同的十三处（均为有意）
+## 与原站不同的十五处（均为有意）
 
-复刻之外，站主明确要求过、或原站自身写错而必须偏离的共十三处。它们全部集中在 `tools/lib/site-links.js` 与 `tools/ingest/wp/staticize.js`（偏好只写一份，构建器与门禁读同一处）：
+复刻之外，站主明确要求过、或原站自身写错而必须偏离的共十五处。它们全部集中在 `tools/lib/site-links.js`、`tools/ingest/wp/staticize.js` 与 `tools/media/apply.js`（偏好只写一份，构建器与门禁读同一处）：
 
 - **语言浮层**：原位置 `trp-bottom-right` 在手机上正好盖住底部菜单项，改为 `trp-top-right`。做法是换 TranslatePress 自己的位置类，不是写 CSS 覆盖 —— 插件的 `.trp-top-right` 规则在源码顺序上晚于 `:hover` 规则，同特异度下后来者赢，不需要 `!important`。
 - **询盘按钮**：产品页那 68 个（中英各 34）原本指向 `starbillions.cn` 的联系页（第三个域名），改为 `https://wa.me/8613714286517`。只按按钮可见文案匹配，所以改文案就会安全地不再命中；其余“联系我们”类链接一律未动。
@@ -162,7 +171,7 @@ Pages 侧要做的是把域名挂上项：Custom domains 里 `starbillions.cn`�
 - **演示案例**（`/portfolio/` 中英各 10 页 + `/project-cat/` 各 5 页）—— 标题全是拉丁填充（“A lacus bibendum pulvinar”），而且它们是**全站仅剩 40 处 `starbillions.savetime.work` 引用**的宿主（图片指向建站期预览域名），其中 8 页还把 PHP 的 `file_get_contents` Warning 直接打进了自己的正文
 - **WordPress 示例页** `/sample-page/`（“我白天是个邮递员，晚上就是个有抱负的演员”）与 `/woodmart_slider/123/`（渲染出来是“什么都没找到”）—— 两者都在 sitemap 里，且无任何链接指向
 
-机制上只有一张清单（`staticize.js` 的 `OWNER_REMOVED_SECTIONS` + `isOwnerRemoved`），它**同时**决定“不构建哪些页”和“`isExcluded` 摘掉哪些链接”，所以两半不可能不一致；页头的 博客 / Portfolio 两个菜单项由 `removeOwnerMenuItems` 在 URL 改写**之前**整块 `li` 摘掉（在那之后 href 已没了，认不出来），带死链的子树一起走、自己链接还活着的父项只摘死子项。产物：137 页（原 217）、754 个文件、190 MB，菜单剩 4 项（首页 / 产品中心 / 关于我们 / 联系我们），门禁断言“无文件、无链接、无空标签、留下的菜单确实是这四个”。
+机制上只有一张清单（`staticize.js` 的 `OWNER_REMOVED_SECTIONS` + `isOwnerRemoved`），它**同时**决定“不构建哪些页”和“`isExcluded` 摘掉哪些链接”，所以两半不可能不一致；页头的 博客 / Portfolio 两个菜单项由 `removeOwnerMenuItems` 在 URL 改写**之前**整块 `li` 摘掉（在那之后 href 已没了，认不出来），带死链的子树一起走、自己链接还活着的父项只摘死子项。产物：137 页（原 217），菜单剩 4 项（首页 / 产品中心 / 关于我们 / 联系我们），门禁断言“无文件、无链接、无空标签、留下的菜单确实是这四个”。（当时的文件数/体积不写在这里：字体与 WebP 两轮各自又改过它，当前值只看 `npm run check` 的 `dist:` 行。）
 
 一个必须记住的坑：文章 URL 的真实形态是 `/2021/08/26/slug/`（固定链接是 `/%year%/%monthnum%/%day%/%postname%/`，缓存目录层级就是证据），而我第一版规则写成了 `/2021-08-26/slug/`。**控制台与编辑器会把这两种写法渲染成同一串**，所以代码看着对、测试也绿（测试数据是我按同一个误解写的），却一页都没删掉。判定路径形态要用 `split('/')` 看分段，不要看打印出来的字符串。
 
@@ -181,3 +190,9 @@ Pages 侧要做的是把域名挂上项：Custom domains 里 `starbillions.cn`�
 **12. 所有 `tel:` 链接改拨公司自己的号码。** 产品页联系行写着 `Phone: (86) 13714286517`，但 Woodmart 盖在整行上的隐形链接是 `<a class="wd-fill" href="tel: (064) 332-1233">`——主题演示的新西兰号码。手机上点那一行就拨到了国外：**可见文字是访客能核的那一半，href 是真正行动的那一半**。全站只有三个不同的 `tel:` 值（真的一个，占位符两种写法：带空格与 `%20`），所以“按位比对、不等于本站号码就改”是安全的（先量后写，不是推论）；共修 121 处。号码取自 `ENQUIRY_PHONE` 常量，与底部栏、WhatsApp 按钮同源。
 
 **13. 英文页不再加载 TranslatePress 的动态翻译脚本。** `trp-translate-dom-changes.js` 是个 MutationObserver，把页面加载后新出现的字符串 POST 给 `trp-ajax.php`，失败则回退 `admin-ajax.php`——两个在静态主机上都是 404，实实在在在每个英文页的控制台上留了 2–4 条错误。删它的依据是三个量，不是推测：症状范围与文件范围完全对齐（只有英文页加载它，也只有英文页报错）；它定义的唯一符号 `TRP_Translator` 全仓无任何其他引用；它的功能在这台主机上**一次也没成功过**——从未工作过的东西不会因为删反而变坏。只删标签，语言切换真正在用的 `trp-frontend-compatibility.js` 与 `trp_data` 一个字不改。标签有三种写法（WP Rocket 把它改成 `data-rocket-src`，本站引号两种都用），所以匹配的是整个标签且**要求标签体只能是空白**：内联 JSON 里提到这个文件名的地方不会被误删。另外补了一处基础设施级的认知：资产发现读的是**缓存页**而不是产物页（因为它要看 data 属性与 JSON 里的引用），所以删掉引用并不等于不拷文件——现在按同一张清单 `DEAD_AJAX_SCRIPTS` 剪掉，产物从 843 降到 842 个文件。
+
+**14. 大图发 WebP，不发原站的 PNG/JPG。** 站主问“纯静态应该极快吧”，量出来发现静态描述的是服务器不是重量：首页要拉 327 个请求、15 MB 图。所以 `npm run images` 从**缓存页真正引用的**文件里取 ≥40 KB 的转 WebP（quality 82），构建器把引用改到 `.webp`。**同一张图，不是另一张图**——不重画、不裁、不改文件名里的原扩展名（而是后缀追加），所以一个旧书签指向的还是同一个画面。两次构建实测（把 manifest 临时移开跑一次、放回来跑一次）：**192.6 MB / 842 文件 → 143.9 MB / 844 文件**；本地 HTTP 实访 325–388 个请求，**404 为 0**，`Content-Type: image/webp`。两条门槛都是量过的而不是抄的：11 张转出来省不到 25%，就不转；样式表里**没有任何 ≥150 KB 图**（0 张），所以不动拷出去的 CSS。没跑 `npm run images` 时构建器一个字节不改（Pages 不构建，所以它永远不需要 `sharp`）。
+
+一个必须记的形状：同一文件在一页里**同时**以百分号编码与原样中文两种拼法出现（实测产物：原样 6,206 次、编码 14,185 次），所以改写必须两拼法都命中——只按文件系统拼法匹配会静静漏掉整个 `srcset`，而当原图被剪掉时那就是一片图 404，而门禁如果只读属性列表（`src`/`href`）仍会全绿。
+
+**15. 视频在播放前显示它自己的首帧。** 7 页（中英各 7）共 14 个 `<video>` 没有 `poster`，也没 `src`（源在 Woodmart 的 `data-lazy-load` 里），于是那整块就是一张黑。唯一诚实的候选帧只能从**视频自己**取（本机 `ffmpeg` 取第一帧 → `sharp` 缩到 800px 宽转 WebP），因为产品页的“特色图”14 页全等——都是同一张站内占位图 `62b9cc781cece.png`，拿它当 poster 等于给十四个不同产品贴同一张不相干的图，那比黑块更错。同时补上 `preload="none"`。poster 的名字由**源自己的拼法**把扩展名换掉得到（所以绝对域名与中文文件名都跟着源走），门禁则断言“每个源已转换的视频都写了 poster”并实测 14 个引用全部 `200 image/webp`。没有新增任何内容：那一帧本来就是视频的一部分。

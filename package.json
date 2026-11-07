@@ -3,17 +3,21 @@
     "version": "1.0.0",
     "private": true,
     "type": "module",
-    "description": "Static mirror of tftstar.com for Cloudflare Pages, built from the site's own backup. Zero runtime dependencies.",
+    "description": "Static mirror of tftstar.com for Cloudflare Pages, built from the site's own backup. No runtime dependencies: sharp is a devDependency used by npm run images, which the build treats as optional.",
     "engines": {
         "node": ">=20"
     },
     "scripts": {
         "mirror": "node tools/mirror.mjs",
         "fonts": "node tools/fetch-fonts.mjs",
+        "images": "node tools/media/convert.mjs",
         "check": "node tools/check.mjs",
         "verify": "node tools/mirror.mjs && node tools/check.mjs",
-        "test": "node --test tools/ingest/wp/staticize.test.mjs tools/ingest/wp/search-index.test.mjs tools/lib/site-links.test.mjs",
+        "test": "node --test tools/ingest/wp/staticize.test.mjs tools/ingest/wp/search-index.test.mjs tools/lib/site-links.test.mjs tools/media/apply.test.mjs",
         "wp:data": "node tools/ingest/wp/index.mjs",
         "preview": "node tools/serve.mjs"
+    },
+    "devDependencies": {
+        "sharp": "^0.35.5"
     }
 }

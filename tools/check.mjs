@@ -10,12 +10,13 @@
  * borrowing CSS or links from a server that is already returning fatal errors, and
  * a root-absolute path with no file behind it is a 404 the mirror itself created.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, walk } from './lib/fs-utils.js';
 import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, DEAD_AJAX_SCRIPTS, DEAD_AJAX_WIDGETS, absoluteIdentityUrls, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadAjaxScripts, removeDeadShopControls, removeDeadTabsNavigation, removeOwnerMenuItems, resolvesInOutput } from './ingest/wp/staticize.js';
 import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRY_PHONE, ENQUIRE_LABELS, MOBILE_TOOLBAR, SITE_ORIGIN, rewriteRobotsSitemap, replaceMobileToolbar, repairPhoneLinks } from './lib/site-links.js';
+import { keyForReference, namedAssetPaths } from './media/apply.js';
 import { discover } from './mirror.mjs';
 
 /** The origin the mirror was built for, read from its own build report. */
@@ -56,11 +57,12 @@ const builtByPath = new Map(documents.map((doc) => [`/${doc.rel.replace(/index\.
 
 /**
  * "The origin" means the host the backup was taken from, and the rule is about
- * references this build cannot control. It has one legitimate exception: a deployment
- * served from that very domain - the second site is tftstar.com, which is also where
- * the backup came from - would otherwise have its own canonical URL reported as a
- * leftover of the origin, on all 138 pages. Only the exact declared origin is excluded,
- * so a stale `http://` spelling still fails even when `https://` is the site itself.
+ * references this build cannot control. It has one legitimate exception: one of the two
+ * deployments sharing this code is served from that very domain - the backup came from
+ * tftstar.com, and one of the two sites is tftstar.com - so without the exception that
+ * site's own canonical URL is reported as a leftover of the origin, on all 138 pages.
+ * Only the exact declared origin is excluded, so a stale `http://` spelling still fails
+ * even when `https://` is the site itself.
  */
 const staleOrigins = ORIGIN_URLS.filter((origin) => origin !== siteOrigin);
 const originHits = documents
@@ -935,7 +937,108 @@ check(
   `${survivals.length} difference(s): ${survivals.slice(0, 3).join('; ')}`,
 );
 
-/* 8. the static search replaces the origin's AJAX one ------------------------- */
+/* 8. the media conversions are complete in both directions ------------------- */
+
+/**
+ * `npm run images` is optional, so this section has two states and says which one it is
+ * in, in the same shape as the fonts check above.
+ *
+ * When a manifest exists, none of what is worth asserting shows up in a browser. A page
+ * can name a WebP that was never copied and still look correct wherever the original
+ * happens to remain; a substitution can miss one spelling of one filename and quietly
+ * keep shipping an 800 KB PNG; and the build can drop an original that a stylesheet -
+ * which the page pass never rewrites - still asks for, which is a 404 on a product
+ * photograph, the one failure this site cannot be seen to have.
+ *
+ * So the scan runs over every text file in the output rather than the pages alone, and
+ * uses the builder's own matcher instead of a second copy of the rule: what the build
+ * counted when it chose what to copy is exactly what is counted here.
+ */
+const mediaManifest = exists(join(paths.work, 'media', 'manifest.json'))
+  ? JSON.parse(readFileSync(join(paths.work, 'media', 'manifest.json'), 'utf8'))
+  : null;
+
+if (mediaManifest) {
+  /** role: the jpg the backup had | the webp that replaces it | a video's first frame */
+  const converted = new Map();
+
+  for (const [from, entry] of Object.entries(mediaManifest.images)) {
+    converted.set(from.replace(/^\/+/, ''), 'original');
+    converted.set(entry.to.replace(/^\/+/, ''), 'webp');
+  }
+  for (const entry of Object.values(mediaManifest.posters)) {
+    converted.set(entry.to.replace(/^\/+/, ''), 'poster');
+  }
+
+  const named = new Set();
+  const pagesStillOnOriginals = [];
+
+  for (const file of files.filter((entry) => /\.(html|css|js|json|xml|svg)$/i.test(entry.rel))) {
+    const found = [...namedAssetPaths(readFileSync(file.abs, 'utf8'), mediaManifest)].filter((path) => converted.has(path));
+    for (const path of found) named.add(path);
+
+    // A stylesheet naming an original is legitimate - the build sees it and keeps the
+    // file - but a page naming one means the substitution missed a spelling.
+    const originals = file.rel.endsWith('.html')
+      ? found.filter((path) => converted.get(path) === 'original')
+      : [];
+    if (originals.length > 0) pagesStillOnOriginals.push({ rel: file.rel, count: originals.length, first: originals[0] });
+  }
+
+  const missing = [...named].filter((path) => !known.has(path));
+  check(
+    'every converted file the output asks for is in the output',
+    missing.length === 0,
+    missing.length === 0 ? `${named.size} converted file(s) named, all present` : `${missing.length} missing: ${missing.slice(0, 3).join(', ')}`,
+  );
+
+  const unreferenced = [...converted].filter(([path, role]) => role !== 'original' && !named.has(path) && known.has(path));
+  check(
+    'nothing ships a converted file no document asks for',
+    unreferenced.length === 0,
+    `${unreferenced.length} unreferenced: ${unreferenced.slice(0, 3).map(([path]) => path).join(', ')}`,
+  );
+
+  check(
+    'no page still asks for an image that has a webp',
+    pagesStillOnOriginals.length === 0,
+    pagesStillOnOriginals.length === 0
+      ? `${Object.keys(mediaManifest.images).length} converted image(s) named by pages, every one as webp`
+      : `${pagesStillOnOriginals.length} page(s), e.g. ${pagesStillOnOriginals[0].rel} (${pagesStillOnOriginals[0].count} reference(s), ${pagesStillOnOriginals[0].first})`,
+  );
+
+  const bareVideos = documents.flatMap((doc) => [...doc.text.matchAll(/<video\b[^>]*>/gi)]
+    .filter((match) => {
+      const source = (match[0].match(/\b(?:data-lazy-load|data-src|data-wood-src|src)="([^"]+\.(?:mp4|m4v|webm|ogv|ogg))"/i) || [])[1];
+      return source && mediaManifest.posters[keyForReference(source)] && !/\bposter=/i.test(match[0]);
+    })
+    .map(() => doc.rel));
+  check(
+    'every video with a converted source shows a frame before it plays',
+    bareVideos.length === 0,
+    `${bareVideos.length} tag(s) without a poster${bareVideos[0] ? `, e.g. ${bareVideos[0]}` : ''}`,
+  );
+
+  /**
+   * The weight line, stated only in terms this file can see.
+   *
+   * "46 MB saved" would be a claim about a build that was not run, so instead: how many
+   * converted files the output names, how many originals are not in the deploy, how many
+   * bytes the shipped media actually is - and how many of those originals were never in
+   * the backup either, which is not a saving won here and gets said separately.
+   */
+  const dropped = Object.entries(mediaManifest.images).filter(([from]) => !known.has(from.replace(/^\/+/, '')));
+  const replaced = dropped.filter(([from]) => exists(join(paths.docroot, from.replace(/^\/+/, ''))));
+  const neverInBackup = dropped.length - replaced.length;
+  const convertedKb = Math.round([...named].filter((path) => known.has(path))
+    .reduce((total, path) => total + statSync(join(paths.dist, path)).size, 0) / 1024);
+
+  notes.push(`  info  media: ${named.size} converted path(s) asked for, ${replaced.length} original(s) not in the deploy, ${convertedKb} KB of webp shipped in their place${neverInBackup ? `, ${neverInBackup} of them never in the backup either` : ''}`);
+} else {
+  notes.push('  info  media: npm run images has not been run, so every picture ships as the backup had it');
+}
+
+/* 9. the static search replaces the origin's AJAX one ------------------------- */
 
 /**
  * The search box used to query PHP. It is now fed by search.json, which the build

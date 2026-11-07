@@ -39,7 +39,8 @@ import { copyFile, mkdir, writeFile as writeFileAsync } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { dirname as posixDirname, join as posixJoin, resolve as posixResolve } from 'node:path/posix';
 import { paths } from './lib/paths.js';
-import { exists, removeTree, copyTree } from './lib/fs-utils.js';
+import { exists, removeTree, copyTree, walk } from './lib/fs-utils.js';
+import { applyMediaManifest, mediaOutputs, namedAssetPaths, prunableOriginals, unaskedOutputs } from './media/apply.js';
 import { ENQUIRE_LABELS, ENQUIRY_PHONE, SITE_ORIGIN, rewriteRobotsSitemap, CONTACT_FORM_LABELS, MOBILE_TOOLBAR, enableStaticSearch, localizeGoogleFonts, replaceContactForm, replaceMapWithAddress, replaceMobileToolbar, repairMenuLinks, repairPhoneLinks, rewriteInquireButtons, translateEnglishTitle, updateCopyrightYear, whatsappUrlFor } from './lib/site-links.js';
 import { buildSearchIndex } from './ingest/wp/search-index.js';
 import {
@@ -312,11 +313,19 @@ export async function build({ quiet = false } = {}) {
   let written = 0;
   let copied = 0;
   let homeHtml = '';
-  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0, formsReplaced: 0, mapsReplaced: 0, fontsLocal: 0, fontsMissing: 0, demoMenuItems: 0, deadWidgets: 0, deadTabControls: 0, deadScripts: 0, phoneLinks: 0, identityUrls: 0 };
+  const stats = { rewritten: 0, dropped: 0, inquireLinks: 0, searchWired: 0, shopControls: 0, cards: 0, mobileBars: 0, menuLinks: 0, menuHrefsDropped: 0, titlesFixed: 0, copyrightYears: 0, formsReplaced: 0, mapsReplaced: 0, fontsLocal: 0, fontsMissing: 0, demoMenuItems: 0, deadWidgets: 0, deadTabControls: 0, deadScripts: 0, phoneLinks: 0, identityUrls: 0, mediaImages: 0, mediaPosters: 0 };
   // Written by npm run fonts. An absent manifest is a normal state - the mirror has
   // no network step - so it reads as "keep the original links", not as an error.
   const fontManifestPath = join(paths.public, 'fonts', 'manifest.json');
   const fontManifest = exists(fontManifestPath) ? JSON.parse(readFileSync(fontManifestPath, 'utf8')) : {};
+  /**
+   * WebP and video posters, written by npm run images. An absent manifest is a normal
+   * state - the mirror has no image codec, and Pages runs no build at all - so the site
+   * ships the backup's own bytes: a heavier page, not a broken one.
+   */
+  const mediaManifestPath = join(paths.work, 'media', 'manifest.json');
+  const mediaManifest = exists(mediaManifestPath) ? JSON.parse(readFileSync(mediaManifestPath, 'utf8')) : null;
+  const mediaFilesDir = join(paths.work, 'media', 'files');
   // Inputs for the search index, gathered while writing rather than re-read from disk:
   // the index must describe the pages that were actually shipped, not the cache files
   // they came from.
@@ -444,14 +453,27 @@ export async function build({ quiet = false } = {}) {
     // The origin's search box queried PHP; this points it at a local index instead.
     const search = enableStaticSearch(titled.html);
 
+    /**
+     * WebP and video posters, and this is the last pass on purpose: it is the first
+     * point where a reference has its final spelling. Before it the same picture is an
+     * absolute URL on the backup's host in one attribute, a root-relative path in
+     * another, percent-encoded in `srcset` and verbatim inside Elementor's JSON - after
+     * it there is one form left, and a `.webp` suffix can be appended to whatever the
+     * document actually says instead of guessing which of those four a rule should
+     * cover. The count is reported because 0 applied and 0 to apply are different facts.
+     */
+    const media = applyMediaManifest(search.html, mediaManifest);
+    stats.mediaImages += media.images;
+    stats.mediaPosters += media.posters;
+
     stats.rewritten += out.rewritten;
     stats.dropped += out.dropped;
 
     const target = join(paths.dist, page.outPath);
     await mkdir(dirname(target), { recursive: true });
-    await writeFileAsync(target, search.html, 'utf8');
+    await writeFileAsync(target, media.html, 'utf8');
     written += 1;
-    stats.inquireLinks += occurrences(search.html, whatsapp) - occurrences(positioned, whatsapp);
+    stats.inquireLinks += occurrences(media.html, whatsapp) - occurrences(positioned, whatsapp);
     stats.searchWired += search.wired ? 1 : 0;
     stats.shopControls += Object.values(cleaned.removed).reduce((sum, n) => sum + n, 0);
     stats.mobileBars += bar.replaced;
@@ -465,13 +487,13 @@ export async function build({ quiet = false } = {}) {
     stats.cards += cardsBefore;
 
     if (/^\/product\//.test(page.urlPath) || /^\/en\/product\//.test(page.urlPath)) {
-      productPages.push({ html: search.html, urlPath: page.urlPath, lang: page.urlPath.startsWith('/en/') ? 'en' : 'zh' });
+      productPages.push({ html: media.html, urlPath: page.urlPath, lang: page.urlPath.startsWith('/en/') ? 'en' : 'zh' });
     }
     if (/product-category\//.test(page.urlPath)) {
-      categoryPages.push({ html: search.html, urlPath: page.urlPath });
+      categoryPages.push({ html: media.html, urlPath: page.urlPath });
     }
 
-    if (page.urlPath === '/') homeHtml = search.html;
+    if (page.urlPath === '/') homeHtml = media.html;
   }
 
   // WordPress never cached a 404 response, so the mirror has none. Cloudflare Pages
@@ -498,8 +520,63 @@ export async function build({ quiet = false } = {}) {
     pruned += 1;
   }
 
-  const copies = [...assets].filter(([, kind]) => kind === 'copy').map(([path]) => path);
-  await pool(copies, async (path) => {
+  /**
+   * Converted media enters the copy list, and an original leaves it once nothing in the
+   * written output names it.
+   *
+   * Both halves read dist rather than the cache, and that is the whole point. The WebP
+   * bytes are not in the backup, so no reference pass over the cache could have found
+   * them. And the question "is this jpg still used?" has exactly one honest answer -
+   * what the shipped documents say after every rule has run - because a stylesheet or a
+   * theme script naming the original is invisible to a rule that only rewrote pages.
+   * Anything still named stays: 46 MB of weight is a worse outcome than one dead file,
+   * while a 404 picture is a defect nobody downstream would connect to this line.
+   */
+  let mediaAdded = 0;
+  let mediaUnneeded = 0;
+  let mediaDropped = 0;
+  let mediaKept = 0;
+  let mediaLighterKb = 0;
+
+  if (mediaManifest) {
+    for (const out of mediaOutputs(mediaManifest)) {
+      const key = assetKey(out);
+      if (assets.has(key)) continue;
+      assets.set(key, exists(join(mediaFilesDir, key)) ? 'media' : 'absent');
+      mediaAdded += 1;
+    }
+
+    const named = new Set();
+    for (const file of walk(paths.dist)) {
+      if (!/\.(html|css|js|json|xml|svg)$/i.test(file.rel)) continue;
+      for (const path of namedAssetPaths(readFileSync(file.abs, 'utf8'), mediaManifest)) named.add(path);
+    }
+
+    /**
+     * A converted file nothing asks for does not ship either. `npm run images` works
+     * from the cached pages, and a picture that only appeared inside a widget this build
+     * deletes still has a WebP - 108 KB of nothing on the deploy, in one measured case.
+     */
+    for (const to of unaskedOutputs(mediaManifest, named)) {
+      if (assets.get(assetKey(to)) !== 'media') continue;
+
+      assets.delete(assetKey(to));
+      mediaUnneeded += 1;
+    }
+
+    for (const from of prunableOriginals(mediaManifest, named)) {
+      const key = assetKey(from);
+      if (!assets.has(key)) continue;
+      if (assets.get(key) !== 'copy') { mediaKept += 1; continue; }
+
+      assets.delete(key);
+      mediaDropped += 1;
+      mediaLighterKb += mediaManifest.images[from].fromKb - mediaManifest.images[from].toKb;
+    }
+  }
+
+  const copies = [...assets].filter(([, kind]) => kind === 'copy' || kind === 'media').map(([path, kind]) => ({ path, kind }));
+  await pool(copies, async ({ path, kind }) => {
     const key = assetKey(path);
     const to = join(paths.dist, key);
     await mkdir(dirname(to), { recursive: true });
@@ -508,6 +585,7 @@ export async function build({ quiet = false } = {}) {
     // the file it points at only stops being a foreign host if this text changed too.
     const rewrite = cssRewrites.get(key);
     if (rewrite !== undefined) await writeFileAsync(to, rewrite, 'utf8');
+    else if (kind === 'media') await copyFile(join(mediaFilesDir, key), to);
     else await copyFile(join(paths.docroot, key), to);
     copied += 1;
   });
@@ -541,6 +619,7 @@ export async function build({ quiet = false } = {}) {
   console.log(`  dead scripts   ${stats.deadScripts} script(s) whose only working feature is a PHP endpoint, ${pruned} file(s) not copied any more`);
   console.log(`  identity urls  ${stats.identityUrls} canonical/hreflang value(s) put back to an absolute URL`);
   console.log(`  phone links    ${stats.phoneLinks} tel: link(s) redialled from the theme's demo number to +86${ENQUIRY_PHONE}`);
+  console.log(`  media          ${stats.mediaImages} image reference(s) -> webp, ${stats.mediaPosters} video poster(s), ${mediaDropped} original(s) dropped (-${mediaLighterKb} KB), ${mediaAdded - mediaUnneeded} converted file(s) shipped, ${mediaUnneeded} asked for by nothing${mediaKept ? `, ${mediaKept} original(s) still named so still shipped` : ''}${mediaManifest ? '' : '  [npm run images has not been run - the backup\u2019s own bytes]'}`);
   console.log(`  search         ${index.length} entries (${index.filter((e) => e.lang === 'en').length} en), ${stats.searchWired} pages wired`);
   console.log(`  uncached links ${unknownPages.size} targets the mirror links to but never rendered`);
   console.log(`  in             ${((Date.now() - started) / 1000).toFixed(1)} s\n`);
