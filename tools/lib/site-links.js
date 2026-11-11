@@ -57,6 +57,27 @@ export const ENQUIRY_PHONE = '13714286517';
 export const SITE_ORIGIN = 'https://www.starbillions.cn';
 
 /**
+ * The largest single file this deployment can serve: 25 MiB, the published
+ * per-asset ceiling of Cloudflare Pages.
+ *
+ * Two numbers could be written here and only one of them is the binding one.
+ * GitHub, which stores the repository, rejects a file over 100 MB and says so
+ * in the push output. Cloudflare, which serves the file, refuses one over
+ * 25 MiB (`Error: Pages only supports files up to 25 MiB in size`) and says so
+ * only in its own build log - the push succeeds, the deploy fails, and the
+ * site quietly keeps the previous release. This constant is therefore the
+ * **smaller** of the two, and it is defined once because both halves need to
+ * agree: the build (new-release media, video encoding budget) to avoid making
+ * such a file, and `check.mjs` to catch one that got past the build. A gate
+ * reading the looser number is what let a 36.8 MB video pass every local
+ * assertion on 2026-11-11 while the production host never picked the
+ * deployment up.
+ *
+ * 25 * 1024 * 1024 exactly, so the margin is not eaten by MiB-vs-MB rounding.
+ */
+export const HOST_FILE_MAX_BYTES = 25 * 1024 * 1024;
+
+/**
  * Point `robots.txt` at the sitemap the build just wrote.
  *
  * The `Sitemap:` line cannot be hand-written, whatever the file's own comment used to

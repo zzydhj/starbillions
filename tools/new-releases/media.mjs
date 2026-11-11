@@ -25,10 +25,9 @@ import { copyFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { mkdirSync } from '../lib/fs-utils.js';
 import { paths } from '../lib/paths.js';
+import { HOST_FILE_MAX_BYTES } from '../lib/site-links.js';
 import { encodePath } from './urls.mjs';
-import { MEDIA_MAX_BYTES, VIDEO_COMPRESS_ABOVE, compressVideo } from './video.mjs';
-
-const MB = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+import { MB, VIDEO_COMPRESS_ABOVE, compressVideo } from './video.mjs';
 
 /**
  * How many files land in the gallery and how many in the body.
@@ -70,15 +69,15 @@ export function publishMedia(record) {
   const dropped = [];
   const entries = collectFiles(srcDir);
   // Ceiling before anything is sorted or picked, but **only for files that
-  // have no second act**: a large PDF or a PSD is simply not a page asset, it
-  // is a push that fails at the host. Videos are not filtered here - the same
-  // 144 MB file that a host refuses is the one `compressVideo` exists for, and
-  // applying the ceiling to it first is how a build silently dropped a demo
-  // recording instead of shrinking it (the first cut of this rule did exactly
-  // that, and printed the drop as if it were a decision).
+  // have no second act**: a large PDF or a PSD is simply not a page asset -
+  // the host would refuse it, and nothing here can shrink it. Videos are not
+  // filtered here, because `compressVideo` can and must try: applying the
+  // ceiling to all types first is how a build silently dropped a demo
+  // recording instead of re-encoding it (the first cut did exactly that, and
+  // printed the drop as if it were a decision).
   const fits = (list) => list.filter((f) => {
-    if (f.bytes <= MEDIA_MAX_BYTES) return true;
-    dropped.push(`${f.name} - ${MB(f.bytes)}, over the host per-file limit`);
+    if (f.bytes <= HOST_FILE_MAX_BYTES) return true;
+    dropped.push(`${f.name} - ${MB(f.bytes)}, over the host per-asset limit`);
     return false;
   });
 
@@ -99,22 +98,19 @@ export function publishMedia(record) {
 
   /**
    * Videos get the extra rule: past `VIDEO_COMPRESS_ABOVE` the bytes go
-   * through ffmpeg rather than straight into the tree, and a video that
-   * cannot be made small enough (`ffmpeg` absent, encode failed, the
-   * re-encode not actually smaller, or still over the ceiling afterwards) is
-   * **not copied** - the page loses the video and the build report says so.
-   * Copying it anyway would put the whole repository past the host's limit to
-   * keep one `<video>` tag.
+   * through ffmpeg, which is budgeted to land under the host's per-asset
+   * ceiling, and a video that still cannot be made to fit (`ffmpeg` absent,
+   * encode failed, or the re-encode over budget) is **not copied** - the page
+   * loses the video and the build report names it. Copying it anyway would
+   * take the whole deployment down with it: Pages refuses the oversized file
+   * and then does not publish that build at all, so the live site keeps
+   * serving the previous release with no local signal.
    */
   const copyVideo = (v) => {
     if (v.bytes <= VIDEO_COMPRESS_ABOVE) return copy(v);
     const result = compressVideo(v.abs, join(dstDir, v.name));
     if (!result.ok) {
       dropped.push(`${v.name} - ${MB(v.bytes)}, ${result.note}`);
-      return null;
-    }
-    if (result.toBytes > MEDIA_MAX_BYTES) {
-      dropped.push(`${v.name} - re-encoded to ${MB(result.toBytes)}, still over the host per-file limit`);
       return null;
     }
     return `/uploads/new-releases/${record.slug}/${encodePath(v.name)}`;

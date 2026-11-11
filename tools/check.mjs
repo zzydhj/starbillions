@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, readJson, walk } from './lib/fs-utils.js';
 import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, DEAD_AJAX_SCRIPTS, DEAD_AJAX_WIDGETS, absoluteIdentityUrls, combineStylesheets, expandedShape, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadAjaxScripts, removeDeadShopControls, removeDeadTabsNavigation, removeOwnerMenuItems, resolvesInOutput, rootCssUrls } from './ingest/wp/staticize.js';
-import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRY_PHONE, ENQUIRE_LABELS, MOBILE_TOOLBAR, SITE_ORIGIN, rewriteRobotsSitemap, replaceMobileToolbar, repairPhoneLinks } from './lib/site-links.js';
+import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRY_PHONE, ENQUIRE_LABELS, HOST_FILE_MAX_BYTES, MOBILE_TOOLBAR, SITE_ORIGIN, rewriteRobotsSitemap, replaceMobileToolbar, repairPhoneLinks } from './lib/site-links.js';
 import { keyForReference, namedAssetPaths } from './media/apply.js';
 import { discover } from './mirror.mjs';
 
@@ -377,20 +377,22 @@ check('a sitemap was generated', known.has('sitemap.xml'));
 check('Pages headers file was carried over', known.has('_headers'));
 
 /**
- * The deployment host refuses a single file over 100 MB, and it refuses it at
- * push time - not in the build report, not as a warning. A build that emitted
- * one looked finished until `git push` said otherwise, with no earlier clue:
- * the 144 MB phone recording that started this rule was already sitting in a
- * `新品发布/` folder while every gate above was green. `video.mjs` owns the
- * ceiling on the writing side; this is the reading side, so a ceiling that
- * gets bypassed (a new media path, a large file added by the mirror, a
- * threshold edited in the wrong place) cannot reach the repository.
+ * The asset ceiling the deploying host publishes, asserted over the output.
+ *
+ * Two remote numbers could be written here and only one of them can fail
+ * this site: GitHub rejects a file over 100 MB and says so in the push, while
+ * Cloudflare Pages rejects a file over 25 MiB and says so only in its own
+ * deployment log. The second one is the binding limit and the quieter
+ * failure - `git push` succeeds, the build fails, and production keeps
+ * serving yesterday's release. Reading it from `site-links.js` (the same
+ * constant the encode budget uses) is what keeps the two halves agreeing; the
+ * first cut of this gate read 100 MB, stayed green, and shipped a 36.8 MB
+ * video that no deployment ever served.
  */
-const HOST_FILE_LIMIT = 100 * 1024 * 1024;
 const overHostLimit = files
-  .filter((file) => statSync(file.abs).size > HOST_FILE_LIMIT)
-  .map((file) => `${file.rel} (${(statSync(file.abs).size / 1024 / 1024).toFixed(1)} MB)`);
-check('no file is past the host per-file limit', overHostLimit.length === 0, `${overHostLimit.length} file(s)${overHostLimit[0] ? `, e.g. ${overHostLimit[0]}` : ''}`);
+  .filter((file) => statSync(file.abs).size > HOST_FILE_MAX_BYTES)
+  .map((file) => `${file.rel} (${(statSync(file.abs).size / 1024 / 1024).toFixed(1)} MiB)`);
+check('no file is past the host per-asset limit', overHostLimit.length === 0, `${overHostLimit.length} file(s)${overHostLimit[0] ? `, e.g. ${overHostLimit[0]}` : ''}`);
 
 /**
  * The output must name one host and only one. Which spelling that host is - with or
