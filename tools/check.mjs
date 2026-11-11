@@ -10,11 +10,11 @@
  * borrowing CSS or links from a server that is already returning fatal errors, and
  * a root-absolute path with no file behind it is a 404 the mirror itself created.
  */
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { paths } from './lib/paths.js';
-import { exists, walk } from './lib/fs-utils.js';
+import { exists, readJson, walk } from './lib/fs-utils.js';
 import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, DEAD_AJAX_SCRIPTS, DEAD_AJAX_WIDGETS, absoluteIdentityUrls, combineStylesheets, expandedShape, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadAjaxScripts, removeDeadShopControls, removeDeadTabsNavigation, removeOwnerMenuItems, resolvesInOutput, rootCssUrls } from './ingest/wp/staticize.js';
 import { CONTACT_FORM_LABELS, COPYRIGHT_YEAR, ENQUIRY_PHONE, ENQUIRE_LABELS, MOBILE_TOOLBAR, SITE_ORIGIN, rewriteRobotsSitemap, replaceMobileToolbar, repairPhoneLinks } from './lib/site-links.js';
 import { keyForReference, namedAssetPaths } from './media/apply.js';
@@ -375,6 +375,22 @@ check('the mirror has a root document', documents.some((doc) => doc.rel === 'ind
 check('english pages exist', documents.some((doc) => doc.rel.startsWith(`en${'/'}`) || doc.rel.startsWith('en\\')));
 check('a sitemap was generated', known.has('sitemap.xml'));
 check('Pages headers file was carried over', known.has('_headers'));
+
+/**
+ * The deployment host refuses a single file over 100 MB, and it refuses it at
+ * push time - not in the build report, not as a warning. A build that emitted
+ * one looked finished until `git push` said otherwise, with no earlier clue:
+ * the 144 MB phone recording that started this rule was already sitting in a
+ * `新品发布/` folder while every gate above was green. `video.mjs` owns the
+ * ceiling on the writing side; this is the reading side, so a ceiling that
+ * gets bypassed (a new media path, a large file added by the mirror, a
+ * threshold edited in the wrong place) cannot reach the repository.
+ */
+const HOST_FILE_LIMIT = 100 * 1024 * 1024;
+const overHostLimit = files
+  .filter((file) => statSync(file.abs).size > HOST_FILE_LIMIT)
+  .map((file) => `${file.rel} (${(statSync(file.abs).size / 1024 / 1024).toFixed(1)} MB)`);
+check('no file is past the host per-file limit', overHostLimit.length === 0, `${overHostLimit.length} file(s)${overHostLimit[0] ? `, e.g. ${overHostLimit[0]}` : ''}`);
 
 /**
  * The output must name one host and only one. Which spelling that host is - with or
@@ -979,8 +995,19 @@ let sectionsShipped = 0;
  * no products at all, because its body carries no other grid - the 56 `wd_products`
  * widgets are inside the header's hover dropdown. Comparing cards per page, source
  * against output, says in one number whether a deletion took content or only chrome.
+ *
+ * The subtraction below exists because the new-release build inserts a strip of
+ * six `wd-new-release-card` items into the home page and 产品中心 listing. Those
+ * cards do share the theme's `product-grid-item` class (that is the point - the
+ * styling has to apply), so a naive count sees them as "the shipped page gained
+ * cards" and this deletion-safety gate starts reporting the strip as a mirror
+ * bug. Subtracting them keeps the gate about what it was written to protect -
+ * the mirror's own deletion behaviour - and lets a separate gate below assert
+ * the strip's own integrity against `data/new-products.json`.
  */
-const cards = (text) => (text.match(/class="product-grid-item/g) || []).length;
+const cards = (text) =>
+  (text.match(/class="product-grid-item/g) || []).length
+  - (text.match(/class="product-grid-item wd-new-release-card/g) || []).length;
 
 for (const page of discover(paths.pageCache).filter((page) => !isOwnerRemoved(page.urlPath))) {
   const doc = builtByPath.get(page.urlPath.endsWith('/') ? page.urlPath : `${page.urlPath}/`);
@@ -1262,6 +1289,134 @@ const repoImports = [...runtimeSource.matchAll(/^\s*import\s[^\n]*?from\s+['"][^
 
 check('the shipped search script imports nothing', repoImports.length === 0, `${repoImports.length} import(s) in a file the browser must load alone`);
 for (const line of repoImports.slice(0, 3)) notes.push(`        ${line}`);
+
+/* 7k. new-release integrity --------------------------------------------------- */
+
+/**
+ * The mirror's own gates above assert "the shipped site is what the backup
+ * rendered". These assert "the new-release build produced what
+ * `data/new-products.json` says it should", which is the same style of
+ * claim (source of truth -> artefact on disk) but on the authored half of
+ * the site. Every one of them compares a file count to a JSON count, so
+ * they still pass when there are zero new releases (both sides empty) and
+ * fail the moment the render silently drops a page or a media file.
+ *
+ * The count assertions come in pairs. "Page directories match the records"
+ * proves the render wrote every file; "the pages the sitemap lists all
+ * exist" proves the sitemap did not drift. A bug in either direction shows
+ * up as a real number in the failure message, not as an empty list that
+ * could also mean "the check ran and saw nothing".
+ */
+const newProductsPath = join(paths.data, 'new-products.json');
+if (exists(newProductsPath)) {
+  const newProducts = readJson(newProductsPath);
+  const built = newProducts.filter((r) => !r.skip);
+  const skipped = newProducts.length - built.length;
+
+  const expectedSlugs = built.map((r) => r.slug).sort();
+
+  const zhSlugs = readdirSync(join(paths.dist, 'product'))
+    .filter((n) => n.startsWith('new-')).sort();
+  const enSlugs = readdirSync(join(paths.dist, 'en/product'))
+    .filter((n) => n.startsWith('new-')).sort();
+
+  check(
+    'every new-release product has a Chinese page on disk',
+    sameStrings(zhSlugs, expectedSlugs),
+    `expected ${expectedSlugs.length}, found ${zhSlugs.length} (skipped ${skipped})`,
+  );
+  check(
+    'every new-release product has an English page on disk',
+    sameStrings(enSlugs, expectedSlugs),
+    `expected ${expectedSlugs.length}, found ${enSlugs.length}`,
+  );
+
+  /**
+   * Media files. Each record in the render manifest lists the URLs its
+   * pages name; each URL has to resolve to a file under
+   * `dist/uploads/new-releases/`. This is the same claim the mirror's
+   * "every referenced asset resolves inside dist" makes for cache pages,
+   * scoped to the new tree so it can fail with a specific slug in the
+   * message rather than one of 1400 uploads paths.
+   */
+  const missingMedia = [];
+  for (const doc of documents) {
+    if (!doc.rel.startsWith('product/new-') && !doc.rel.startsWith('en/product/new-')) continue;
+    if (!doc.rel.endsWith('index.html')) continue;
+    for (const url of mediaUrlsIn(doc.text)) {
+      if (!resolvesInOutput(known, url)) missingMedia.push(`${doc.rel} -> ${url}`);
+    }
+  }
+  check(
+    'every media file a new-release page names is in the output',
+    missingMedia.length === 0,
+    `${missingMedia.length} reference(s) unresolved: ${missingMedia.slice(0, 3).join('; ')}`,
+  );
+
+  /**
+   * The strip's six cards on home + 产品中心. Six in Chinese, six in
+   * English, four pages, matching `strip.mjs`'s STRIP_CARDS. If the
+   * insertion regressed (the strip landed on three pages instead of four,
+   * or a rename broke the marker), this number moves and the message
+   * names which page came up short.
+   */
+  const stripPages = documents.filter((doc) => doc.text.includes('data-new-release-strip'));
+  check(
+    'the new-release strip sits on the four pages the owner asked for',
+    stripPages.length === 4,
+    `${stripPages.length} page(s) carry a strip (want 4: home, /en/, 产品中心, /en/产品中心/)`,
+  );
+
+  /**
+   * Sitemap `<loc>` count: the mirror's own pages, plus two per new
+   * release (zh + en), plus the two category listing pages. If render
+   * writes pages but the sitemap append fails, the site silently loses
+   * every new-release page to search engines - which is what this
+   * assertion prevents.
+   */
+  const sitemapText = readFileSync(join(paths.dist, 'sitemap.xml'), 'utf8');
+  const locCount = (sitemapText.match(/<loc>/g) || []).length;
+  const expectedLoc = 137 + built.length * 2 + 2;
+  check(
+    'sitemap carries every new-release page and the category listing',
+    locCount === expectedLoc,
+    `${locCount} <loc> in dist, ${expectedLoc} expected (137 mirror + ${built.length * 2} products + 2 category)`,
+  );
+
+  /**
+   * Search index entries. The mirror wrote 68 (34 products x 2 langs);
+   * the new-release build appended two per record. If the append drops
+   * silently, a buyer searching "新品发布" sees nothing even though the
+   * pages exist.
+   */
+  const searchIndex = readJson(join(paths.dist, 'search.json'));
+  const expectedEntries = 68 + built.length * 2;
+  check(
+    'the static search index carries every new-release page',
+    searchIndex.length === expectedEntries,
+    `${searchIndex.length} entries, ${expectedEntries} expected (68 mirror + ${built.length * 2} new-release)`,
+  );
+}
+
+function sameStrings(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/**
+ * The media URLs a page names, in the same shape `known` uses for its
+ * keys (root-relative, forward-slashed, still percent-encoded the way the
+ * page writes it). Restricted to the new-release tree so this assertion
+ * does not re-litigate every asset the mirror already covers.
+ */
+function mediaUrlsIn(html) {
+  const out = new Set();
+  for (const m of html.matchAll(/(?:src|href|poster)="(\/uploads\/new-releases\/[^"]+)"/g)) {
+    out.add(m[1].slice(1));
+  }
+  return out;
+}
 
 console.log('\n  mirror checks\n');
 for (const line of [...notes, ...failures]) console.log(line);

@@ -9,20 +9,25 @@
 ## 命令
 
 ```
-npm run wp:data     备份的 SQL dump  -> data/wp-*.json（结构化内容）
-npm run images      大图转 WebP + 视频首帧当 poster -> work/media/（可选，见下）
-npm run mirror      页面缓存 + 归档资源 -> dist/
-npm run check       校验产物（部署门禁，失败退出码 1）
-npm run verify      mirror + check
-npm test            URL 改写与内容改动的单元测试
-npm run preview     本地起 dist/
+npm run wp:data          备份的 SQL dump  -> data/wp-*.json（结构化内容）
+npm run images           大图转 WebP + 视频首帧当 poster -> work/media/（可选，见下）
+npm run products:scan    新品发布/ 的 67 个文件夹 -> data/new-products.json + work/ 下的体检表
+npm run mirror           页面缓存 + 归档资源 -> dist/
+npm run products         data/new-products.json -> dist/ 里 130 页 + 媒体 + WebP + 四处入口
+npm run check            校验产物（部署门禁，失败退出码 1）
+npm run verify           mirror + products + check
+npm test                 URL 改写与内容改动的单元测试
+npm run preview          本地起 dist/
 ```
 
 没有 `deploy` 脚本：发布靠推到 GitHub，Pages 从仓库取产物（见下）。
 
-`npm run images` 是**唯一需要依赖与本地工具的命令**（`sharp` + `ffmpeg`），且只在开发机上跑：
-它写的 `work/media/manifest.json` 不入库，Pages 也不跑构建，所以没跑过这条命令时镜像照旧发原站的字节——
-**慢一点，不是坏掉**。跑过一遍之后，`npm run mirror` 才会把引用改成 WebP。
+`npm run images` 与 `npm run products` 里的 WebP 那一步都**需要 `sharp`**（devDependency），
+视频首帧（`images`）与超 20 MB 的新品录屏重编码（`products`）都**需要本机 `ffmpeg`**；
+它们都只在开发机上跑：Pages 不构建，产物里的 WebP 与重编码视频就是普通文件。
+两处都是同一个取舍——**没装就不转，原图与没有那个视频，慢一点 / 少一块，不是坏掉**：
+`products` 会打一行 `webp skipped`，并把被丢的文件逐个报名，页面、分类页、
+sitemap、search.json 全部照写（它们都不需要 `sharp` 或 `ffmpeg`）。
 
 `node tools/mirror.mjs --site-origin https://your-domain.com` 换目标域名；
 `--language-floater top-right|top-left|bottom-right|bottom-left` 换语言浮层位置；
@@ -38,6 +43,17 @@ tools/lib/paths.js          所有路径的唯一来源
 tools/lib/fs-utils.js       文件遍历与删除
 tools/media/convert.mjs     npm run images：转 WebP / 视频首帧，写 work/media/manifest.json
 tools/media/apply.js        把那张表落到一份成品文档上（唯一有单测的媒体层）
+tools/new-releases/         新品发布：站主的文件夹 -> 产品页（补作，备份里没有这些页）
+  rules.mjs                 纯函数抽取层：尺寸 / 型号 / 分辨率 / 形状 / 接口 / 排针 / 电压 / 触摸
+  scan.mjs                  npm run products:scan 的入口，写 data/new-products.json 与体检表
+  compat.mjs                同尺寸兼容库：只在一组记录全体说同一件事时才填
+  render.mjs                通版外壳手术：breadcrumb 所在 section 到 <footer 整段换掉
+  media.mjs                 图 / 视频 / PDF 拷进 dist/uploads/new-releases/<slug>/
+  video.mjs                 体积上限：超 20 MB 的录屏先走 ffmpeg 重编码，治不了才不发
+  webp.mjs                  新品图转 WebP，并重写所有点到它们的地方
+  build.mjs                 npm run products 的入口：页面 / 分类页 / sitemap / search.json / 入口
+  strip.mjs                 首页与产品中心底部的六张新品卡
+  urls.mjs                  URL 段的百分号编码（磁盘上的文件名不动）
 tools/ingest/wp/            WordPress 备份的读取与探测
   sql-dump.js               MySQL dump 状态机解析器（不能用行正则：post_content 含 \n 与 );）
   model.js                  行 -> 对象、postmeta 按 post 聚合
@@ -46,11 +62,12 @@ tools/ingest/wp/            WordPress 备份的读取与探测
   index.mjs                 抽取入口
   probe-*.mjs               各项清点（内容、构建器、Elementor、缓存、覆盖率、变体、规格完整性…）
   untar.mjs                 零依赖 tar+gzip 抽取（bsdtar 解不了这里的 UTF-8 中文文件名）
-data/                       数据库抽出的结构化内容（入库）
+data/                       数据库抽出的结构化内容（入库），加 data/new-products.json（新品清单，scan 写）
 public/                     直接放 Pages 根的文件：_headers、_redirects、robots.txt
 docs/fixes.md               原站固有问题清单（按你的决定：先 1:1 原样保留）
-dist/                       产物，不入库
+dist/                       产物，**入库**（Pages 不构建，推到仓库的那份就是线上那份）
 work/                       临时物：解包的 1 GB docroot、解压后的 SQL、探测报告，不入库
+新品发布/                    站主的新品文件夹（67 个子目录，573 MB），.gitignore 掉，只有 products:scan 读它
 ```
 
 `work/archive/friway/` 是被替换掉的早期方案（自己写的设计系统与模板），留在磁盘上仅作历史参考，不参与构建。
@@ -69,6 +86,13 @@ work/                       临时物：解包的 1 GB docroot、解压后的 SQ
 8. **资源发现要走三跳，且只对“本地确实有”的跨域地址动手。** 第一跳是页面里的引用（按路径形态而非属性名），第二跳是已拷 CSS 的 `url()`（不然整套 Font Awesome 字体丢），第三跳是已拷 JS 里**按名字要到**的 webpack 分块（`名字.哈希.bundle.min.js` 只存在于 Elementor 的 runtime 表里，前两跳永远看不到）。跳不过去的时候宁可保留原样：CSS 里指向旧域的绝对地址**只在备份里有同一相对路径的字节时**才改指向本地——指到一个自己造的空路径比指到一个至少有图的旧域更难解释，也更快使门禁变成假报告。
 9. **媒体改写是最后一道工序，而且它判“还需要拷什么”看的是产物、不是缓存。** 一张图的引用在同一页里可能有四种写法（绝对域名、根绝对、百分号编码、原样中文），而编码形状要到 URL 改写之后才定下来，所以加 `.webp` 这一刀必须在最后，且要同时命中两种拼法：只按文件系统的拼法去匹配，会漏掉一个 `srcset`——而漏掉的那一半在原图被剪掉之后就是一个 404。剪不剪同理：页面过了改写，拷出去的 CSS 没有，所以“这张原图还有人提吗”只能在写完之后扫 dist 来回答（扫的时候锚在清单自己的目录上，不靠“长得像个文件名”：`x(1).jpg`、`Picture topaz.png`、`微信图片_2023111.jpg` 都会挫败一个过于宽的文件名模式，而错方向的代价是一个图打不开）。
 
+下面四条属于**补作**那半边（`tools/new-releases/`，备份里没有的页面），它们同样每条对应一次实测踩坑：
+
+10. **新品资源放 `dist/uploads/new-releases/`，不放 `wp-content/uploads/`。** 镜像的剪枝是“扫缓存页的引用，没人要就删”，而新品按定义没有缓存页：放进那个目录就是每跑一次 mirror 被删一次，且报告上只写“未引用”。同理，新品的媒体重写范围（`webp.mjs` 的 `collectPages()`）是一张**手写清单**：两个产品树、两个分类页、四个 strip 入口页——漏掉入口页就是 24 个 `<img>` 指着已删的原图。
+11. **替换串包含搜索串时，不能链式跑两遍。** 两种拼法（编码 / 原样）各跑一遍 `split().join()` 在镜像那边是对的，因为 `x.jpg` 与 `x.webp` 不互相包含；新品改用后缀追加（`x.png` → `x.png.webp`）之后搜索串成了替换串的前缀，第二遍会重读第一遍刚写的结果，产出 `x.png.webp.webp`。现在两种拼法进**同一个 alternation**、`replace` 只扫原文一遍，并按长度降序排、尾加 `(?![A-Za-z0-9._-])` 要求名字到此为止（否则 `x.png` 会咬掉 `x.png.jpg` 的前半）。
+12. **删原图必须排在重写之后，而且删不掉要说出来。** Windows 上 `rmSync` 紧跟 `writeFileSync` 会间歇 EPERM：锁的不是刚被读的文件，而是 Defender / 缩略图服务正在打开的**同目录新写文件**。分成“转换 → 重写 → 清扫”三遍后，失败从每轮十几个降到 0；仍然失败时计数上报（`stuck`）而不是抛错——那时 WebP 已在盘上、页面已指过去，残留原图是重量不是 404。静默跳过才是错的：十五个文件 17 MB 就这么留在了产物里，而门禁照旧绿。
+13. **体积上限要分“能治”与“不能治”两类，而它必须在写盘之前。** 部署主机在 push 时拒收任何超过 100 MB 的单文件：不在构建报告里，不在门禁能读到的警告里，只会让一次看上去完整的构建在推的时候碰壁。所以 `video.mjs` 先拿体积判：图 / PDF / 其他超上限直接不拷（它们没有第二幕），视频超 20 MB 走 ffmpeg 重编码（144.3 MB → 36.8 MB，1080p 不缩尺、保留声音、`+faststart` 让浏览器不必下完才能播），重编码失败或改完仍超限才丢。上限先不分类型一律生效是个错：第一版就这么把那段演示录屏静静丢了，还把它打成一条“决定”报出来。读的那一面是门禁：“产物里没有文件超过单文件上限”。
+
 ## 校验器断言什么
 
 `npm run check` 不只是"构建成功了"，它断言：
@@ -86,6 +110,9 @@ work/                       临时物：解包的 1 GB docroot、解压后的 SQ
 - 媒体改写两边都对得上：产物点名的转换文件**必须在产物里**、产物**不得还点原图**（页面级）、不得带着没人要的转换文件，而带视频的页必须真的写了 poster；没跑 `npm run images` 时这一组降级为一条 info
 - 样式表合并后级联不得改变：每页的“级联形状”（把 bundle 就地展开回它冒充的那串文件）必须逐字符等于构建器记录的合并前值；bundle 每一段必须等于磁盘上那个成员文件的字节；bundle 文件名必须等于自身内容的 sha1；对产物重跑合并必须挖不出东西
 - 双语结构齐备（根文档、`/en/`、sitemap、`_headers`、`404.html`）
+- 新品那一半（只在 `data/new-products.json` 存在时才跑）：双语页目录数逐一比对 slug、页点名的 `/uploads/new-releases/` 文件**必须在产物里**、四个入口页都带着 strip、sitemap 的 `<loc>` 数等于 137 + 64×2 + 2、search.json 条目数等于 68 + 64×2——后者防的是重复追加（第一版每跑一轮 build 就追加 130 条，七轮后 `sitemap.xml` 涨到 1047 条而门禁全绿）
+
+统计产品卡那条断言读的是 `class="product-grid-item"` 的**出现次数**，而新品 strip 的卡也用同一个类名让主题样式命中，所以计数时必须先减掉 `wd-new-release-card`：不减，镜像那条“删控件不许带走内容”的安全断言就会因为新增内容而变红，那是一句真话被误读成事故（数子串不等于数控件，同一个坑的两个方向）。
 
 `404.html` 用首页自己的 header/footer 拼装（原站从未缓存 404 页），因此它不是复刻、是补作 —— 站点名从首页 `<title>` 后缀取，不硬编码。
 
@@ -126,9 +153,9 @@ Pages 侧：Custom domains 里 `starbillions.cn` 与 `www.starbillions.cn` **两
 
 将来要换域名时，仓库内改动只有一处：`SITE_ORIGIN` 改成新主机，重跑 `npm run mirror`。这个常量是答案的唯一定义处，产物里不会残留另一个 host。仓库外只有一件配套事：zone 里那条 bare↔www 规则得与它一致。
 
-## 与原站不同的十六处（均为有意）
+## 与原站不同的十七处（均为有意）
 
-复刻之外，站主明确要求过、或原站自身写错而必须偏离的共十六处。它们全部集中在 `tools/lib/site-links.js`、`tools/ingest/wp/staticize.js` 与 `tools/media/apply.js`（偏好只写一份，构建器与门禁读同一处）：
+复刻之外，站主明确要求过、或原站自身写错而必须偏离的共十七处。前十六处改的是备份里**已经有**的东西，集中在 `tools/lib/site-links.js`、`tools/ingest/wp/staticize.js` 与 `tools/media/apply.js`（偏好只写一份，构建器与门禁读同一处）；第十七处往产物里**加**备份没有的页面，全部在 `tools/new-releases/`。这两家公司在代码上是分开的，在这份清单上也是：
 
 - **语言浮层**：原位置 `trp-bottom-right` 在手机上正好盖住底部菜单项，改为 `trp-top-right`。做法是换 TranslatePress 自己的位置类，不是写 CSS 覆盖 —— 插件的 `.trp-top-right` 规则在源码顺序上晚于 `:hover` 规则，同特异度下后来者赢，不需要 `!important`。
 - **询盘按钮**：产品页那 68 个（中英各 34）原本指向 `starbillions.cn` 的联系页（第三个域名），改为 `https://wa.me/8613714286517`。只按按钮可见文案匹配，所以改文案就会安全地不再命中；其余“联系我们”类链接一律未动。
@@ -206,3 +233,15 @@ Pages 侧：Custom domains 里 `starbillions.cn` 与 `www.starbillions.cn` **两
 两个实测踩出来的坑，改代码前请先读：（a）第一版用子串判断 `title` 属性，而本站有个真实存在的 `id='wd-woo-opt-title-limit-css'`，于是 545 段全被当成“替代样式表”拒绝合并，构建报告一切正常、实际一个没合——现在属性解析统一走 `tools/lib/html-tags.js` 的 `tagAttributes`，构建器与门禁读同一个实现。（b）多个删除操作必须**从后往前**应用；正向沿用原始偏移会把 `</head>` 吃掉并留下一个已合并的链接，而其余一切看上去完全正常（bundle 内容完整、计数下降、每个 CSS 文件都在）。另外这个后道必须跑在所有文件写完之后：第一版插在 `copyPublicExtras()` 之前，那四个字体 CSS 还没落盘，一个成员读不到就废掉整段，269 段因此没合——“丢一个成员”的保守拒绝在此时是对的，错的是顺序。
 
 为什么可以 `immutable`：bundle 的文件名是自身字节的 sha1，改一个规则就换名字，不可能给访客一份旧的。而 `/fonts/*.css` **不能**进 immutable：它的名字是 Google **CSS URL** 的 sha1，URL 不变但 Google 返回的内容会变（新字重、字体版本轮换），冻住就等于把访客锁在几个月前抓的那份上。`_headers` 里两段注释写的就是这个区别。
+
+**17. 新品发布：67 个文件夹不在备份里，那 130 页是造出来的。** 站主给的是磁盘上的 `新品发布/`（67 个子目录、573 MB、437 JPG + 72 PNG + 39 PDF + 5 MP4），WordPress 从来没有这些产品，所以这一处不是复刻而是**补作**：上面 1–16 条都在改备份已有的字节，这一条往产物里加备份没有的东西。为了这条线在读代码时看得见，它不住在 `mirror.mjs` 里（那个文件的职责是忠实重现备份，而这里的职责相反），而是在 `tools/new-releases/`，由 `npm run verify` 排在 mirror 之后、check 之前：
+
+- **一个文件夹 = 一个产品**（站主定的），64 建 + 3 跳。跳的三个不是型号而是合集（`4.3寸-10.1寸显示屏`、`4.3寸-8寸HDMI套件`、`旋钮屏规格书`），一个 PDF 里写着十几个屏幕，拿它当“一个产品”就是编一个不存在的 SKU。清单是 `data/new-products.json`（**入库**，它是这一批产品的唯一权威源）；源文件夹 `.gitignore` 掉，因为 Pages 不构建而 573 MB 原始资料进仓库只会把 history 卡死。
+- **参数从 PDF 正文里抽，不靠人抄。** `rules.mjs` 是一组纯函数（尺寸 / 型号 / 分辨率 / 形状 / 接口 / 排针 / 电压 / 触摸），实测 64 行里：尺寸 63、形状 35、分辨率 39、接口 34、面板 20、型号 16、排针 4、触摸 3，电压 0（没有一个 PDF 写了它）。抽不出来的**留空**，页面上那一行就不写——写一行空比编一行数字诚实。抽取层自己踩过的坑都写在那些常量旁边（`480x272` 不能翻成 `272×480`，因为那是源写下的字序；`十寸` 得走中文数字；`XBY2.1` 因小数点被型号正则拒过）。
+- **同尺寸兼容库只在一组记录全体说同一件事时才填**（`compat.mjs`，39 行被填过）。第一版按“同尺寸里最常见的值”投票，结果给 `4寸圆形` 填了 `720×720`——那是同尺寸里**方形**页的多数值，票数多不代表对这一行是对的。现在是 unanimity（全体一致才填）+ 列表取交集，宁缺勿错。
+- **详情页用通版**：取现有产品页 `starbillions-1-28″-tft-xby128fhd` 作外壳，只把 breadcrumb 所在 `<section>` 到 `<footer>` 之间整段换掉（那 75 KB 是相关产品卡与演示图，正好不需要），head / 菜单 / 页脚 / 移动端底栏一个字节不动——主题 CSS 因此不需要任何新规则，`check` 的级联形状断言也照旧成立（区间里那条 Elementor 逐页样式表 link 会跟着带走，外壳的 cascade 形状被逐页复制进 `work/mirror-report.json`）。英文标题按模板拼（尺寸 + 形状 + 分辨率 + 接口），英文页跑同一个 `replaceMobileToolbar`，不然底栏会是中文。
+- **入口按站主的要求开四处**：中英首页 + 中英产品中心，底部各插一条六张卡的 section（`strip.mjs`）。只有 sitemap 与搜索能到这些页不算上线——买家从首页走进去看不到的东西，对他就不存在。六张是预览不是全部，“查看全部”指回 `/product-category/新品发布/`（那页带全部 64 张）。卡片用主题自己的 `product-grid-item` 类名，所以不需要新 CSS；额外带一个 `wd-new-release-card` 后缀，门禁数产品卡时先减掉它（否则镜像那条“删控件不许带走内容”的安全断言会因为新增而变红）。
+- **媒体放 `dist/uploads/new-releases/<slug>/`，文件名原样保留**（包括 `微信图片_2023111.jpg` 与 `XBY18004C18规格书.pdf`：站主会在两次构建之间改那个文件夹，加一张图只应该让那一个文件的 hash 变，而不是把整个 slug 的 URL 都洗一遍）。百分号编码只发生在写进 HTML 的那一刻。图集上限六张（一进五略，与主题 flexslider 能干净渲染的数量对齐）、正文十二张，剩下的不拷。`sharp` 在的时候 381 张转 WebP（与镜像同一套门槛：≥40 KB、至少省 25%、quality 82，两个半边看起来像同一只手做的），35 张省不到、20 张在地板下。“复刻的几条硬规则”里的 10–13 条全部是这一层踩出来的。（不是“产物小”，是“产物推得上去”：144 MB 的单文件会被部署主机直接拒收，见硬规则 13 与 `video.mjs`。）
+- **只发本站。** tftstar.com 那份部署按站主 2026-11-07 的指示不动：它是同一套代码的另一个主机，而新品是本站的内容决定，不是“两边必须一字不差”的技术约束。
+
+实测：新增 130 页（64×2 产品 + 2 分类列表）+ 474 个媒体文件（381 webp / 56 原图 / 32 PDF / 5 MP4，其中那 144.3 MB 录屏重编码成 36.8 MB），sitemap 137 → 267 条 `<loc>`，search.json 68 → 196 条，产物 399.1 MB / 1465 文件 / 268 页（新品这一批把镜像原有的 143.9 MB 拉到 399.1 MB，靠 `preload="none"` 与 WebP 才不是每个访客都付）。体检表（每一行抽到了什么、哪行靠兼容库填的）写在 `work/new-products-review.csv`，不入库，但它是这一批页能被人审的唯一形式。

@@ -17,6 +17,12 @@ work/
 # The backup itself, supplied as an input to the ingest rather than stored here.
 24.4.22-tftstar/
 
+# Owner-authored new-release material (573 MB of photos / videos / spec PDFs).
+# Same shape as the backup: an input the build reads once and turns into
+# data/new-products.json + dist/, neither of which needs the raw folder to stay
+# on disk after that. The scanner errors out clearly if this folder is missing.
+新品发布/
+
 # The Friway design reference. It informed an earlier, abandoned build and is not part
 # of this mirror, so shipping it would put someone else's template in the repo.
 Template/

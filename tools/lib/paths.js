@@ -39,6 +39,14 @@ export const paths = {
   /** The backup as delivered: a SQL archive and a site tar.gz. Read-only input. */
   backup: resolve(root, '24.4.22-tftstar'),
 
+  /**
+   * Owner-authored new-release material: one subfolder per product, with images,
+   * videos and PDF spec sheets. Read by tools/new-releases/scan.mjs to produce
+   * data/new-products.json. This is not part of the WordPress backup; the mirror
+   * does not look here.
+   */
+  newReleases: resolve(root, '新品发布'),
+
   sql: resolve(root, 'work/tftstar.sql'),
 
   /** Unpacked web root of the site. Asset paths in the cached pages resolve against this. */
