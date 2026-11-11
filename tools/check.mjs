@@ -12,7 +12,8 @@
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { join, relative } from 'node:path';
 import { paths } from './lib/paths.js';
 import { exists, readJson, walk } from './lib/fs-utils.js';
 import { FLOATER_POSITIONS, ORIGIN_URLS, OWNER_REMOVED_SECTIONS, DEAD_AJAX_SCRIPTS, DEAD_AJAX_WIDGETS, absoluteIdentityUrls, combineStylesheets, expandedShape, isOwnerRemoved, jsChunkNames, localizeCssAssetUrls, removeDeadAjaxScripts, removeDeadShopControls, removeDeadTabsNavigation, removeOwnerMenuItems, resolvesInOutput, rootCssUrls } from './ingest/wp/staticize.js';
@@ -375,6 +376,67 @@ check('the mirror has a root document', documents.some((doc) => doc.rel === 'ind
 check('english pages exist', documents.some((doc) => doc.rel.startsWith(`en${'/'}`) || doc.rel.startsWith('en\\')));
 check('a sitemap was generated', known.has('sitemap.xml'));
 check('Pages headers file was carried over', known.has('_headers'));
+
+/**
+ * Every `<loc>` the sitemap advertises must have a page in the output.
+ *
+ * Counting entries proves the append ran; it says nothing about whether the
+ * files exist, and a `<loc>` with nothing behind is worse than no sitemap -
+ * it teaches the crawler to 404 on our own URLs. This is the general form of
+ * the miss that a 2026-11-11 release shipped: the category listing was in the
+ * sitemap, was on disk, and was not in the deployment, because the ignore
+ * rule for the source folder had swallowed the generated page named after it
+ * (see the gate below).
+ */
+if (known.has('sitemap.xml')) {
+  const locPaths = [...readFileSync(join(paths.dist, 'sitemap.xml'), 'utf8')
+    .matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+  const missingLocs = locPaths.filter((loc) => {
+    const pathname = decodeURIComponent(new URL(loc).pathname);
+    const rel = pathname === '/' ? 'index.html'
+      : `${pathname.replace(/^\//, '').replace(/\/$/, '')}/index.html`;
+    return !known.has(rel);
+  });
+  check('every sitemap <loc> has a page in the output', missingLocs.length === 0,
+    `${missingLocs.length} of ${locPaths.length} loc(s) name no file, e.g. ${missingLocs.slice(0, 2).join(', ')}`);
+
+  /**
+   * ...and the inverse of that, on the axis the mirror cannot see: `known` is
+   * the disk, while Pages publishes what git was **given**. A file an ignore
+   * rule swallows passes every disk-reading assertion above and simply never
+   * reaches the internet, so the release looks published from this terminal
+   * and 404s from a browser.
+   *
+   * git is asked rather than a local pattern matcher, so "ignored" keeps one
+   * definition in the project, and `-v` is what makes the message name the
+   * rule (`​.gitignore:24:/新品发布/`) instead of just a file the reader then
+   * has to go hunting for. Two shape details cost a first attempt here:
+   * `walk(paths.dist)` returns paths relative to **dist**, while
+   * `check-ignore` resolves against the repository root - feeding the dist
+   * form asks git about paths that do not exist and gets "not ignored" for
+   * all of them, green and blind. And a `--stdin` line needs its own
+   * newline, or the last path is dropped.
+   *
+   * Exit status 0 (some path matched) and 1 (none did) are both answers;
+   * anything else - no repository, no git - reports as skipped, because the
+   * claim is about a repository and a source tree handed over without history
+   * is not a broken build.
+   */
+  const deployPrefix = relative(paths.root, paths.dist).split('\\').join('/');
+  const asked = spawnSync('git', ['check-ignore', '-v', '--stdin'], {
+    cwd: paths.root,
+    input: files.map((file) => `${deployPrefix}/${file.rel.split('\\').join('/')}`).join('\n') + '\n',
+    encoding: 'utf8',
+  });
+  const ignored = asked.status === 0 || asked.status === 1
+    ? asked.stdout.split('\n').filter(Boolean).map((line) => line.split('\t').pop())
+    : null;
+  check('nothing in the output is git-ignored, because dist is the deployment',
+    ignored === null || ignored.length === 0,
+    ignored === null
+      ? `git unavailable (${asked.error ? asked.error.code ?? asked.error.message : `exit ${asked.status}`}), skipped`
+      : `${ignored.length} file(s) ignored, e.g. ${asked.stdout.split('\n').filter(Boolean).slice(0, 2).join(' | ')}`);
+}
 
 /**
  * The asset ceiling the deploying host publishes, asserted over the output.

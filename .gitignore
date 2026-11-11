@@ -21,7 +21,15 @@ work/
 # Same shape as the backup: an input the build reads once and turns into
 # data/new-products.json + dist/, neither of which needs the raw folder to stay
 # on disk after that. The scanner errors out clearly if this folder is missing.
-新品发布/
+#
+# Anchored to the repository root on purpose. Unanchored, a gitignore pattern
+# matches at every depth, and the generated category pages are named after this
+# very folder - `dist/product-category/新品发布/index.html` and its `/en/` twin
+# were therefore ignored, never committed, and 404 in production while the disk
+# and every local gate said they existed (2026-11-11). A source folder that
+# shares its name with a page slug is not optional commentary: the pattern has
+# to say where it applies.
+/新品发布/
 
 # The Friway design reference. It informed an earlier, abandoned build and is not part
 # of this mirror, so shipping it would put someone else's template in the repo.
